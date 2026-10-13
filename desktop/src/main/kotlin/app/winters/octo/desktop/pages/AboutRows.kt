@@ -66,10 +66,12 @@ internal fun AboutRows(app: AppState, settings: AppSettings) {
         }
         SwitchRow(
             "Check for updates automatically",
-            "Looks every few hours and downloads in the background.",
+            if (updates.notifyOnly) "Looks every few hours and says when upstream has a new version to merge."
+            else "Looks every few hours and downloads in the background.",
             prefs.checkAutomatically,
         ) { on -> change { it.copy(checkAutomatically = on) } }
-        if (app.os == DesktopOs.Windows) {
+        // A build that only says when a version is out installs nothing.
+        if (app.os == DesktopOs.Windows && !updates.notifyOnly) {
             ChoiceRow(
                 "Install updates",
                 installHelp(prefs.install),
@@ -85,7 +87,7 @@ internal fun AboutRows(app: AppState, settings: AppSettings) {
         ) { on -> change { it.copy(earlyVersions = on) } }
         ActionRow(
             "New versions",
-            updates.lastLine ?: "Signed releases from GitHub.",
+            updates.lastLine ?: if (updates.notifyOnly) "Upstream's releases, told of but never installed: this copy has changes of its own." else "Signed releases from GitHub.",
             if (updates.checking) "Checking" else "Check now",
             { app.scope.launch { updates.check() } },
             enabled = !updates.checking,

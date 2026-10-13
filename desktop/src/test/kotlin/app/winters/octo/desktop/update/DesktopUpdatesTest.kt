@@ -60,22 +60,45 @@ class DesktopUpdatesTest {
         override fun destroy() {}
     }
 
-    private fun updates(os: DesktopOs = DesktopOs.Windows, program: File? = null): DesktopUpdates {
+    private fun updates(os: DesktopOs = DesktopOs.Windows, program: File? = null, running: String = "1.1.0", notifyOnly: Boolean = false): DesktopUpdates {
         val client = OkHttpClient()
         val folder = File(temp.root, "updates")
+        val version = PlayerVersion.parse(running)!!
         val updater = PlayerUpdater(
             PlayerApp.Desktop,
-            PlayerVersion.parse("1.1.0")!!,
+            if (notifyOnly) version.numbersOnly() else version,
             ReleaseFeed(client, File(folder, "releases.json"), "Octo test", apiBase = github.api),
             client,
             folder,
             listOf(github.publicKey),
             pick = { installerFor(it, os, "x64", "deb") },
         )
-        return DesktopUpdates(settings, UpdaterAvailability.On(PlayerVersion.parse("1.1.0")!!), os, folder, updater, start = { command ->
+        return DesktopUpdates(settings, UpdaterAvailability.On(version), os, folder, updater, start = { command ->
             started += command
             fakeProcess(if (launches) 0 else 1)
-        }, program = program)
+        }, program = program, notifyOnly = notifyOnly)
+    }
+
+    // A copy with changes of its own hears of a new version but never
+    // fetches it: installing it would replace the copy.
+    @Test
+    fun notifyOnlySaysANewVersionIsOutAndFetchesNothing(): Unit = runBlocking {
+        publish("1.2.0")
+        val updates = updates(running = "1.1.0-sleezy.3", notifyOnly = true)
+        updates.check()
+        assertNull(updates.ready)
+        assertEquals("Octo 1.2.0 is out upstream. Merge it into this copy to get it.", updates.lastLine)
+        val fetched = File(temp.root, "updates").walk().filter { it.isFile && it.extension == "msi" }.toList()
+        assertTrue("fetched $fetched", fetched.isEmpty())
+    }
+
+    // 1.2.0-sleezy.6 is built on 1.2.0, so 1.2.0 is not news to it.
+    @Test
+    fun notifyOnlyCountsACopyAsTheVersionItIsBuiltOn(): Unit = runBlocking {
+        publish("1.2.0")
+        val updates = updates(running = "1.2.0-sleezy.6", notifyOnly = true)
+        updates.check()
+        assertEquals("Octo is up to date.", updates.lastLine)
     }
 
     @Test

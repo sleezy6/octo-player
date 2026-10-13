@@ -274,6 +274,9 @@ compose.desktop {
         // octo.discordAppId in gradle.properties (it is public, not a secret)
         // or -Pocto.discordAppId=... . Without one, Settings leaves Discord out.
         providers.gradleProperty("octo.discordAppId").orNull?.takeIf(String::isNotBlank)?.let { jvmArgs("-Docto.discordAppId=${it.trim()}") }
+        // octo.updatesNotifyOnly=true (gradle.properties): the updater says
+        // when a new version is out but never fetches or installs it.
+        if (providers.gradleProperty("octo.updatesNotifyOnly").orNull?.trim() == "true") jvmArgs("-Docto.updates.notifyOnly=true")
         nativeDistributions {
             // MSI for Windows, DMG for macOS, DEB and RPM for Linux.
             //

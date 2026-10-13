@@ -74,14 +74,25 @@ jobs:
         shell: bash
         run: echo "OCTO_BUILD=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
 
+      # A build run by hand on this copy is named for the upstream release it
+      # is built on and how many commits it adds: 1.7.0-sleezy.6. Upstream's
+      # tags are read from its public repository, here only, never pushed.
+      - name: Version from upstream
+        if: needs.version.outputs.version == ''
+        shell: bash
+        run: |
+          git fetch --quiet --no-tags https://github.com/winters27/octo-player.git '+refs/tags/desktop-v*:refs/tags/desktop-v*'
+          base=$(git describe --tags --match 'desktop-v[0-9]*' --exclude 'desktop-v*-*' --abbrev=0 HEAD)
+          echo "FORK_VERSION=${base#desktop-v}-sleezy.$(git rev-list --count "$base"..HEAD)" >> "$GITHUB_ENV"
+
       - name: Tests
         run: ./gradlew :desktop:test --no-daemon
 
       - name: Installers
-        # A tag's version (none when run by hand) goes into the app and its installers.
+        # A tag's version, or this copy's (Version from upstream), goes into the app and its installers.
         # Bash on every system: PowerShell splits -PoctoDesktopVersion=1.1.0 at its first dot.
         shell: bash
-        run: ./gradlew ${{ matrix.tasks }} -PoctoBuild=${{ env.OCTO_BUILD }} ${{ needs.version.outputs.version && format('-PoctoDesktopVersion={0}', needs.version.outputs.version) || '' }} --no-daemon
+        run: ./gradlew ${{ matrix.tasks }} -PoctoBuild=${{ env.OCTO_BUILD }} -PoctoDesktopVersion=${{ needs.version.outputs.version || env.FORK_VERSION }} --no-daemon
 
       - uses: actions/upload-artifact@v7
         with:

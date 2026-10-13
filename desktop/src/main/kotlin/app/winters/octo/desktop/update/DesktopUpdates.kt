@@ -59,6 +59,12 @@ fun updaterAvailability(
 }
 
 const val FORCE_PROPERTY = "octo.updates.force"
+
+// Set on a build with changes of its own: new versions are only told of,
+// never downloaded or installed, since one would replace this build. Its
+// version is compared by its numbers alone, so 1.7.0-sleezy.6 is not
+// "older" than the 1.7.0 it is built on.
+const val NOTIFY_ONLY_PROPERTY = "octo.updates.notifyOnly"
 const val API_PROPERTY = "octo.updates.api"
 
 // The folder of the jar this runs from.
@@ -160,6 +166,8 @@ class DesktopUpdates(
     private val now: () -> Long = System::currentTimeMillis,
     // The installed program, which Windows opens again after the update.
     private val program: File? = installedProgram()?.let(::File),
+    // Only says a new version is out (NOTIFY_ONLY_PROPERTY).
+    val notifyOnly: Boolean = false,
 ) {
     val enabled: Boolean get() = availability is UpdaterAvailability.On && updater != null
 
@@ -198,7 +206,7 @@ class DesktopUpdates(
         checking = true
         val early = settings.current.updates.earlyVersions
         val result = try {
-            withContext(Dispatchers.IO) { updater.check(early) }
+            withContext(Dispatchers.IO) { updater.check(early, download = !notifyOnly) }
         } finally {
             checking = false
         }
@@ -213,7 +221,7 @@ class DesktopUpdates(
                 withContext(Dispatchers.IO) { forgetDownloads() }
                 lastLine = "Octo is up to date."
             }
-            is UpdateCheck.Available -> lastLine = "Octo ${result.version} is out."
+            is UpdateCheck.Available -> lastLine = if (notifyOnly) "Octo ${result.version} is out upstream. Merge it into this copy to get it." else "Octo ${result.version} is out."
             is UpdateCheck.NoInstaller -> lastLine = "Octo ${result.version} is out, but not yet for this computer."
             is UpdateCheck.Refused -> {
                 ready = null
@@ -307,7 +315,9 @@ class DesktopUpdates(
             val program = installedProgram()?.let(::File)
             val availability = updaterAvailability(installed = program != null)
             val folder = updatesFolder(cache, program, os)
-            val on = availability as? UpdaterAvailability.On ?: return DesktopUpdates(settings, availability, os, folder, null, program = program)
+            val notifyOnly = System.getProperty(NOTIFY_ONLY_PROPERTY) == "true"
+            val on = availability as? UpdaterAvailability.On ?: return DesktopUpdates(settings, availability, os, folder, null, program = program, notifyOnly = notifyOnly)
+            val running = if (notifyOnly) on.running.numbersOnly() else on.running
             // A client of its own: the system's certificates only, never a
             // server's trusted ones or its headers.
             val client = OkHttpClient.Builder()
@@ -323,14 +333,17 @@ class DesktopUpdates(
             val arch = archName()
             val updater = PlayerUpdater(
                 PlayerApp.Desktop,
-                on.running,
+                running,
                 ReleaseFeed(client, File(folder, "releases.json"), "Octo/${on.running} (desktop)", apiBase = api),
                 client,
                 folder,
                 trustedKeys(),
                 pick = { assets -> installerFor(assets, os, arch, linuxKind) },
             )
-            return DesktopUpdates(settings, availability, os, folder, updater, program = program)
+            return DesktopUpdates(settings, availability, os, folder, updater, program = program, notifyOnly = notifyOnly)
         }
     }
 }
+
+// The version without its early part: 1.7.0-sleezy.6 as 1.7.0.
+internal fun PlayerVersion.numbersOnly(): PlayerVersion = PlayerVersion(major, minor, patch)
