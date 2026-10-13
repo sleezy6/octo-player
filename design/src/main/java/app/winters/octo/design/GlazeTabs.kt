@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,7 +57,9 @@ fun gearShiftTint(index: Int, pill: Float, selected: Int): Float {
 // its edge; the pill is lit faintly in the accent from the side it came
 // from, and the tabs it passes on its way flash a little accent, like
 // gears going by. With `fillWidth` the tabs share the width given;
-// without, each is as wide as the widest label.
+// without, each is as wide as the widest label, or, when they would not
+// all fit so, as wide as its own label with the room left shared out, so
+// one long label is not cut short beside short ones.
 @Composable
 fun GlazeTabs(
     count: Int,
@@ -80,7 +83,8 @@ fun GlazeTabs(
         if (pill.value != selected.toFloat()) way = if (selected > pill.value) 1f else -1f
         if (motion.still) pill.snapTo(selected.toFloat()) else pill.animateTo(selected.toFloat(), octoTween(motion, OctoDuration.Neutral, OctoEasing.Smooth))
     }
-    var cell by remember { mutableFloatStateOf(0f) }
+    // Where each tab starts and how wide it is, from the last layout.
+    var cells by remember { mutableStateOf(Cells.None) }
 
     Glaze(
         modifier
@@ -121,10 +125,11 @@ fun GlazeTabs(
                 .padding(4.dp)
                 .selectableGroup()
                 .drawBehind {
-                    if (cell <= 0f) return@drawBehind
+                    if (cells.count == 0) return@drawBehind
                     val at = pill.value
                     val corner = CornerRadius(size.height / 2f)
-                    val left = at * cell
+                    val left = cells.leftAt(at)
+                    val cell = cells.widthAt(at)
                     drawRoundRect(PillFill, Offset(left, 0f), Size(cell, size.height), corner)
                     // The accent light on the pill, from the side it came
                     // from, stronger while it moves.
@@ -142,24 +147,73 @@ fun GlazeTabs(
                     for (index in 0 until count) {
                         val tint = if (pill.isRunning) gearShiftTint(index, at, selected) else 0f
                         if (tint > 0f) {
-                            drawRoundRect(OctoColors.Accent.copy(alpha = tint), Offset(index * cell, 0f), Size(cell, size.height), corner)
+                            drawRoundRect(OctoColors.Accent.copy(alpha = tint), Offset(cells.lefts[index], 0f), Size(cells.widths[index], size.height), corner)
                         }
                     }
                 },
         ) { measurables, constraints ->
             val tall = constraints.maxHeight
-            val widest = measurables.maxOfOrNull { it.maxIntrinsicWidth(tall) } ?: 0
+            val natural = measurables.map { it.maxIntrinsicWidth(tall) }
+            val widest = natural.maxOrNull() ?: 0
             val width = if (fillWidth && constraints.hasBoundedWidth) {
                 constraints.maxWidth
             } else {
                 (widest * count).coerceIn(constraints.minWidth, if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE)
             }
-            val each = if (count > 0) width.toFloat() / count else 0f
-            cell = each
-            val placeables = measurables.map { it.measure(Constraints.fixed(each.roundToInt(), tall)) }
+            val widths = tabWidths(natural, width.toFloat(), equal = fillWidth || widest * count <= width)
+            val lefts = FloatArray(count).also { for (i in 1 until count) it[i] = it[i - 1] + widths[i - 1] }
+            val next = Cells(lefts, widths)
+            if (next != cells) cells = next
+            val placeables = measurables.mapIndexed { index, it ->
+                val right = (lefts[index] + widths[index]).roundToInt()
+                it.measure(Constraints.fixed(right - lefts[index].roundToInt(), tall))
+            }
             layout(width, tall) {
-                placeables.forEachIndexed { index, placeable -> placeable.place((index * each).roundToInt(), 0) }
+                placeables.forEachIndexed { index, placeable -> placeable.place(lefts[index].roundToInt(), 0) }
             }
         }
+    }
+}
+
+// How wide each tab is, `width` in all: the same for every tab when
+// `equal`; otherwise each as wide as its own label (`natural`), with the
+// room left shared out evenly, or, with too little room for every label,
+// each cut by the same share.
+internal fun tabWidths(natural: List<Int>, width: Float, equal: Boolean): FloatArray {
+    val count = natural.size
+    if (count == 0) return FloatArray(0)
+    if (equal) return FloatArray(count) { width / count }
+    val total = natural.sum().toFloat()
+    if (total <= 0f) return FloatArray(count) { width / count }
+    if (total <= width) {
+        val spare = (width - total) / count
+        return FloatArray(count) { natural[it] + spare }
+    }
+    return FloatArray(count) { natural[it] * width / total }
+}
+
+// The tabs as laid out: where each starts and how wide it is. The pill,
+// part way between two tabs, takes the place and width between theirs.
+internal class Cells(val lefts: FloatArray, val widths: FloatArray) {
+    val count: Int get() = lefts.size
+
+    fun leftAt(at: Float): Float = between(lefts, at)
+
+    fun widthAt(at: Float): Float = between(widths, at)
+
+    private fun between(values: FloatArray, at: Float): Float {
+        val clamped = at.coerceIn(0f, (count - 1).toFloat())
+        val from = clamped.toInt()
+        val to = minOf(from + 1, count - 1)
+        val part = clamped - from
+        return values[from] + (values[to] - values[from]) * part
+    }
+
+    override fun equals(other: Any?): Boolean = other is Cells && lefts.contentEquals(other.lefts) && widths.contentEquals(other.widths)
+
+    override fun hashCode(): Int = 31 * lefts.contentHashCode() + widths.contentHashCode()
+
+    companion object {
+        val None = Cells(FloatArray(0), FloatArray(0))
     }
 }

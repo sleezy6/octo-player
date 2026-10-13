@@ -2,8 +2,9 @@ package app.winters.octo.playback
 
 // How much of a song is ready before it starts playing, the same choices on
 // the phone and the desktop. A second is what players wait by default.
+// Kept short, as they share one row of choices.
 enum class StartAfter(val ms: Int, val label: String) {
-    Instant(250, "As soon as possible"),
+    Instant(250, "At once"),
     Short(1_000, "1 second"),
     Steady(2_500, "2.5 seconds"),
     Safe(5_000, "5 seconds"),
