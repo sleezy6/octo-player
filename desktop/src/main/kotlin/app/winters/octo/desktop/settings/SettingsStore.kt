@@ -286,7 +286,13 @@ data class Appearance(
 data class MotionCoverPrefs(
     val enabled: Boolean = false,
     val server: String = "",
+    // Album grids (Albums, an artist's albums, Home's shelves): still, the
+    // tile under the pointer moving, or every tile in sight moving.
+    val grids: MotionGrids = MotionGrids.Hover,
 )
+
+@Serializable
+enum class MotionGrids { Off, Hover, Always }
 
 // The window's colours: the playing cover blurred into a glow across the
 // top, or the full player's moving wash of it behind the whole window.

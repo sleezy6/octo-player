@@ -4,6 +4,8 @@ import app.winters.octo.desktop.settings.MotionCoverPrefs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -38,8 +40,11 @@ class MotionArt(
     @Volatile
     var folder: File? = null
 
-    // One lookup or download at a time for each album.
+    // One lookup or download at a time for each album, and a few at once in
+    // all: a grid of albums asking together stays well inside what an
+    // artwork server allows (20 requests a second from one address).
     private val locks = ConcurrentHashMap<String, Mutex>()
+    private val asking = Semaphore(MAX_ASKING)
 
     // Lookups by album, read from the folder once.
     private var lookups: MutableMap<String, Lookup>? = null
@@ -62,16 +67,18 @@ class MotionArt(
         val key = lookupKey(server, artist, album)
         if ((resting[key] ?: 0) > now()) return null
         return locks.getOrPut(key) { Mutex() }.withLock {
-            withContext(Dispatchers.IO) {
-                try {
-                    load(folder, server, key, artist, album, px)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    // Unreachable, busy, or an answer that makes no sense:
-                    // the still cover stays, and the album rests a while.
-                    resting[key] = now() + RETRY_AFTER_MS
-                    null
+            asking.withPermit {
+                withContext(Dispatchers.IO) {
+                    try {
+                        load(folder, server, key, artist, album, px)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // Unreachable, busy, or an answer that makes no sense:
+                        // the still cover stays, and the album rests a while.
+                        resting[key] = now() + RETRY_AFTER_MS
+                        null
+                    }
                 }
             }
         }
@@ -233,6 +240,7 @@ class MotionArt(
         const val NONE_FOR_MS = 7L * 24 * 60 * 60 * 1000
         const val RETRY_AFTER_MS = 10L * 60 * 1000
         const val MAX_LOOKUPS = 5000
+        const val MAX_ASKING = 4
         const val MAX_LOOP_BYTES = 40L * 1024 * 1024
         const val MAX_FOLDER_BYTES = 400L * 1024 * 1024
     }

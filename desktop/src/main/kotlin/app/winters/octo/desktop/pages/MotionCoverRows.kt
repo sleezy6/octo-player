@@ -15,6 +15,7 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.motion.ServerCheck
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.desktop.settings.MotionCoverPrefs
+import app.winters.octo.desktop.settings.MotionGrids
 import kotlinx.coroutines.delay
 
 // How long typing rests before the address is kept and checked, so a half
@@ -33,7 +34,7 @@ internal fun MotionCoverGroup(app: AppState, settings: AppSettings) {
         SwitchRow(
             "Animated covers",
             if (calm) "Hold still while motion is reduced, by Calm motion or your system."
-            else "Apple Music's moving covers, in the full player, the mini player and on album pages.",
+            else "Apple Music's moving covers, in the full player, the mini player, on album pages and in album grids.",
             prefs.enabled,
         ) { on -> motion { it.copy(enabled = on) } }
         if (prefs.enabled) {
@@ -62,8 +63,23 @@ internal fun MotionCoverGroup(app: AppState, settings: AppSettings) {
                     placeholder = "artwork.example.com",
                 )
             }
+            ChoiceRow("In album grids", gridsHelp(prefs.grids), MotionGrids.entries, prefs.grids, ::gridsName) { grids ->
+                motion { it.copy(grids = grids) }
+            }
         }
     }
 }
 
 private val ServerFieldWidth = 260.dp
+
+private fun gridsName(grids: MotionGrids): String = when (grids) {
+    MotionGrids.Off -> "Off"
+    MotionGrids.Hover -> "On hover"
+    MotionGrids.Always -> "Always"
+}
+
+private fun gridsHelp(grids: MotionGrids): String = when (grids) {
+    MotionGrids.Off -> "Album grids keep still covers."
+    MotionGrids.Hover -> "The album under the pointer moves."
+    MotionGrids.Always -> "Every album in sight moves. Uses more power and downloads more."
+}

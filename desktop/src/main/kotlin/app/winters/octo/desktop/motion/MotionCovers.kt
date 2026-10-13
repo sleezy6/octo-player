@@ -7,6 +7,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -30,6 +35,7 @@ import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.settings.MotionCoverPrefs
 import app.winters.octo.desktop.ui.LocalWindowShown
 import app.winters.octo.player.immersive.CoverFadeMs
+import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.AlbumWithSongs
 import app.winters.octo.subsonic.Song
 import kotlinx.coroutines.CoroutineScope
@@ -138,9 +144,15 @@ fun Song.motionArtist(): String? =
 
 fun AlbumWithSongs.motionArtist(): String? = (displayArtist ?: artist).takeIf(String::isNotBlank)
 
+fun Album.motionArtist(): String? = (displayArtist ?: artist).takeIf(String::isNotBlank)
+
 // A cover that moves where its album has an animated one: the still cover
 // as always, with the loop fading in over it once ready. Still when the
 // setting is off, motion is reduced, or the window is out of sight.
+// `playing` off holds it still (an album grid's tile not under the
+// pointer): a loop showing fades back out, and none is looked up. A tile
+// waits `settleMs` before asking, so the pointer sweeping across a grid,
+// or a grid scrolling past, asks about none of what it passes.
 @Composable
 fun MotionCoverArt(
     coverId: String?,
@@ -151,16 +163,23 @@ fun MotionCoverArt(
     online: Boolean = false,
     placeholder: ImageVector = OctoIcons.Album,
     retry: Boolean = false,
+    playing: Boolean = true,
+    settleMs: Long = 0,
 ) {
     Box(modifier) {
         Cover(coverId, Modifier.fillMaxSize(), shape = shape, online = online, placeholder = placeholder, retry = retry)
         val covers = LocalMotionCovers.current
-        if (covers != null && artist != null && album != null) Loop(covers, artist, album, shape)
+        if (covers != null && artist != null && album != null) {
+            // Kept a moment after playing stops, while the loop fades out.
+            var fading by remember { mutableStateOf(false) }
+            LaunchedEffect(playing) { if (playing) fading = true }
+            if (playing || fading) Loop(covers, artist, album, shape, playing, settleMs) { fading = false }
+        }
     }
 }
 
 @Composable
-private fun Loop(covers: MotionCovers, artist: String, album: String, shape: Shape) {
+private fun Loop(covers: MotionCovers, artist: String, album: String, shape: Shape, playing: Boolean, settleMs: Long, gone: () -> Unit) {
     val prefs by covers.prefs.collectAsState()
     val still = LocalReduceMotion.current || !LocalWindowShown.current
     if (!prefs.enabled || prefs.server.isBlank() || still || album.isBlank()) return
@@ -169,21 +188,39 @@ private fun Loop(covers: MotionCovers, artist: String, album: String, shape: Sha
         // Everything below starts afresh for another album, so the last
         // album's loop never shows while the next one's is found.
         key(artist, album, loopPx, prefs.server) {
-            val file by produceState<File?>(null) { value = covers.art.loopFor(artist, album, loopPx) }
-            file?.let { loop -> Playing(covers, loop, shape) }
+            val file by produceState<File?>(null) {
+                if (settleMs > 0) delay(settleMs)
+                value = covers.art.loopFor(artist, album, loopPx)
+            }
+            val loop = file
+            if (loop != null) {
+                Playing(covers, loop, shape, playing, gone)
+            } else if (!playing) {
+                // Stopped before anything showed: nothing to fade.
+                SideEffect(gone)
+            }
         }
     }
 }
 
 @Composable
-private fun Playing(covers: MotionCovers, loop: File, shape: Shape) {
+private fun Playing(covers: MotionCovers, loop: File, shape: Shape, playing: Boolean, gone: () -> Unit) {
     val picture by produceState<Image?>(null) { covers.frames(loop).collect { value = it } }
-    val shown by animateFloatAsState(if (picture != null) 1f else 0f, tween(motionScale().ms(CoverFadeMs.toInt())), label = "animated cover")
-    val image = picture ?: return
+    val shown by animateFloatAsState(
+        if (picture != null && playing) 1f else 0f,
+        tween(motionScale().ms(CoverFadeMs.toInt())),
+        label = "animated cover",
+        finishedListener = { if (it == 0f) gone() },
+    )
+    val image = picture
+    if (image == null) {
+        if (!playing) SideEffect(gone)
+        return
+    }
     Canvas(Modifier.fillMaxSize().clip(shape).graphicsLayer { alpha = shown }) {
         drawIntoCanvas { canvas -> canvas.nativeCanvas.drawImageRect(image, centreSquare(image), Rect.makeWH(size.width, size.height), Smooth, null, true) }
     }
-    Box(Modifier.fillMaxSize().artworkRim(shape))
+    Box(Modifier.fillMaxSize().artworkRim(shape).graphicsLayer { alpha = shown })
 }
 
 private val Smooth = FilterMipmap(FilterMode.LINEAR, MipmapMode.NONE)
