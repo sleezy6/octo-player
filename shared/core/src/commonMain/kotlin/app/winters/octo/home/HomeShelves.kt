@@ -3,6 +3,11 @@ package app.winters.octo.home
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.NoSuchFileException
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
 // Home's server shelves (its stations, Made for you lists and chart) as
@@ -16,23 +21,53 @@ class HomeShelfStore<T : Any>(private val folder: File, private val serializer: 
         encodeDefaults = false
     }
 
+    // Read through NIO, which lets a save replace the file while it is
+    // read: on Windows, a file read through java.io cannot be replaced or
+    // removed until the reader lets go, and the save was lost.
     fun read(server: String): T? {
         val file = fileFor(server) ?: return null
-        return runCatching { if (file.isFile) json.decodeFromString(serializer, file.readText()) else null }.getOrNull()
+        return runCatching {
+            val text = try {
+                patiently { String(Files.readAllBytes(file.toPath()), Charsets.UTF_8) }
+            } catch (e: NoSuchFileException) {
+                return null
+            }
+            json.decodeFromString(serializer, text)
+        }.getOrNull()
     }
 
-    // Written beside the old file first, so a reader never sees half of one.
-    // A write that fails leaves the last one in place.
+    // Written beside the old file first, then moved over it in one step, so
+    // a reader never sees half of one. Something else holding the file
+    // open (a virus scanner, a backup) is waited out a while; a write that
+    // still fails leaves the last one in place.
     @Synchronized
     fun write(server: String, shelves: T) {
         val file = fileFor(server) ?: return
         runCatching {
             folder.mkdirs()
-            val next = File(folder, file.name + ".tmp")
-            next.writeText(json.encodeToString(serializer, shelves))
-            if (!next.renameTo(file)) {
-                file.delete()
-                next.renameTo(file)
+            val next = File(folder, file.name + ".tmp").toPath()
+            Files.write(next, json.encodeToString(serializer, shelves).toByteArray(Charsets.UTF_8))
+            patiently {
+                try {
+                    Files.move(next, file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+                } catch (e: AtomicMoveNotSupportedException) {
+                    Files.move(next, file.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                }
+            }
+        }
+    }
+
+    // Runs `step`, trying again for a while when the system refuses it (on
+    // Windows, while something else has the file open). A missing file is
+    // an answer, not a refusal.
+    private fun <R> patiently(step: () -> R): R {
+        val giveUpAt = System.nanoTime() + BUSY_FILE_WAIT_MS * 1_000_000
+        while (true) {
+            try {
+                return step()
+            } catch (e: IOException) {
+                if (e is NoSuchFileException || System.nanoTime() > giveUpAt) throw e
+                Thread.sleep(10)
             }
         }
     }
@@ -46,6 +81,9 @@ class HomeShelfStore<T : Any>(private val folder: File, private val serializer: 
         MessageDigest.getInstance("SHA-256").digest(text.toByteArray())
             .joinToString("") { ((it.toInt() and 0xff) + 0x100).toString(16).substring(1) }
 }
+
+// How long a file that something else has open is waited for.
+private const val BUSY_FILE_WAIT_MS = 2_000L
 
 // What a shelf shows once the server answers: what it already shows when
 // the answer is equal (the same items in the same order), so nothing on
