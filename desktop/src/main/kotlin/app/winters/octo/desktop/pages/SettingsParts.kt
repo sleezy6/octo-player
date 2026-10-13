@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
@@ -55,6 +56,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import app.winters.octo.design.CardEdge
 import app.winters.octo.design.scrollbar
 import app.winters.octo.design.CardFill
@@ -357,13 +359,54 @@ internal fun SwitchRow(title: String, caption: String?, on: Boolean, change: (Bo
     }
 }
 
-// A setting with a few choices, the chosen one on the darker pill.
+// A setting with a few choices, the chosen one on the darker pill. The
+// choices sit beside the name while that leaves the name room to read;
+// when they are many or long, or the window narrow, the name and its line
+// take the row's width and the choices go under them, at its right edge.
 @Composable
 internal fun <T> ChoiceRow(title: String, caption: String?, options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
-    SettingRow(title, caption) {
-        GlazeSegments(options, selected, label, onSelect)
+    val gap = Space.Xxl
+    val below = Space.M
+    val least = ChoiceNameLeast
+    Layout(
+        content = {
+            Column {
+                Txt(title, DesktopType.body, OctoColors.TextPrimary)
+                if (caption != null) Txt(caption, DesktopType.meta, OctoColors.TextMuted, Modifier.padding(top = Space.Xxs), maxLines = 3)
+            }
+            GlazeSegments(options, selected, label, onSelect)
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = RowHeight.Roomy)
+            .padding(horizontal = RowInset, vertical = Space.L),
+    ) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val choices = measurables[1].measure(loose)
+        val beside = width - choices.width - gap.roundToPx() >= least.roundToPx()
+        if (beside) {
+            val name = measurables[0].measure(loose.copy(maxWidth = width - choices.width - gap.roundToPx()))
+            val height = maxOf(name.height, choices.height, constraints.minHeight)
+            layout(width, height) {
+                name.place(0, (height - name.height) / 2)
+                choices.place(width - choices.width, (height - choices.height) / 2)
+            }
+        } else {
+            val name = measurables[0].measure(loose)
+            val top = name.height + below.roundToPx()
+            val height = maxOf(top + choices.height, constraints.minHeight)
+            layout(width, height) {
+                name.place(0, 0)
+                choices.place(width - choices.width, top)
+            }
+        }
     }
 }
+
+// How wide a choice's name is kept at least, beside its choices, before
+// they go under it instead: room for a name and a short line under it.
+private val ChoiceNameLeast = 240.dp
 
 // A value along a line of a fixed width, with what it reads right beside
 // it. `live` sends the value while dragging; `onRelease` hears when a
