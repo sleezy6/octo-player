@@ -9,6 +9,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.concurrent.thread
 
 class HomeShelvesTest {
     @get:Rule val temp = TemporaryFolder()
@@ -95,5 +97,39 @@ class HomeShelvesTest {
         val answer = listOf(Shelf("st1", "Morning"), Shelf("st2", "Chill"))
         assertNotSame(shown, answer)
         assertSame(shown, answered(shown, answer))
+    }
+
+    // Something reading the file over and over (Home on start, a virus
+    // scanner, a test waiting for a save) never costs a save. On Windows a
+    // file read through java.io could not be replaced while open, and the
+    // save was dropped in silence.
+    @Test
+    fun savesLandWhileTheFileIsBeingRead() {
+        val store = store()
+        store.write("server-a", shelves)
+        val reading = AtomicBoolean(true)
+        val reader = thread {
+            while (reading.get()) store.read("server-a")
+        }
+        try {
+            repeat(200) { n ->
+                val next = shelves.copy(stations = listOf(Shelf("st$n", "Station $n")))
+                store.write("server-a", next)
+                assertEquals("save $n", next, store.read("server-a"))
+            }
+        } finally {
+            reading.set(false)
+            reader.join()
+        }
+    }
+
+    @Test
+    fun noLeftoverFileAfterASave() {
+        val store = store()
+        store.write("server-a", shelves)
+        store.write("server-a", shelves.copy(chart = emptyList()))
+        val left = File(temp.root, "home").listFiles()!!.map { it.name }
+        assertEquals(1, left.size)
+        assertEquals(false, left.single().endsWith(".tmp"))
     }
 }
