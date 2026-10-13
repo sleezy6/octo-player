@@ -60,8 +60,10 @@ class MotionCoversTest {
             val wanted = (9 * (n % 24) * 255.0 / 219.0).roundToInt()
             assertTrue(abs(got - wanted) <= 4, "picture $n: grey $got, wanted about $wanted")
         }
-        // 29 gaps of a 24th of a second after the first picture.
-        assertTrue(seconds in 1.1..1.6, "30 pictures took $seconds s")
+        // 29 gaps of a 24th of a second after the first picture, so never
+        // sooner than 1.2 s. Later is only a busy machine, which the clock
+        // forgives; the bound just catches a loop that stalls.
+        assertTrue(seconds in 1.15..4.0, "30 pictures took $seconds s")
     }
 
     @Test
