@@ -194,6 +194,11 @@ object SettingsSize {
     val Slider = 200.dp
     val Reading = 60.dp
     val EqPlot = 160.dp
+    // How wide a choice's name stays beside its choices before they go
+    // under it (ChoiceRow).
+    val ChoiceNameLeast = 240.dp
+    // A web address typed into a row, like the artwork server's.
+    val AddressField = 260.dp
     // The tile behind a section's icon at the top of its page.
     val SectionIcon = 36.dp
 

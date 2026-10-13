@@ -8,9 +8,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import app.winters.octo.design.GlassField
 import app.winters.octo.design.LocalReduceMotion
+import app.winters.octo.design.SettingsSize
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.motion.ServerCheck
 import app.winters.octo.desktop.settings.AppSettings
@@ -59,7 +59,7 @@ internal fun MotionCoverGroup(app: AppState, settings: AppSettings) {
                 GlassField(
                     typed,
                     { typed = it },
-                    Modifier.width(ServerFieldWidth),
+                    Modifier.width(SettingsSize.AddressField),
                     placeholder = "artwork.example.com",
                 )
             }
@@ -70,7 +70,6 @@ internal fun MotionCoverGroup(app: AppState, settings: AppSettings) {
     }
 }
 
-private val ServerFieldWidth = 260.dp
 
 private fun gridsName(grids: MotionGrids): String = when (grids) {
     MotionGrids.Off -> "Off"

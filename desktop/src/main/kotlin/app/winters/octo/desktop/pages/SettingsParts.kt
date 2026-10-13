@@ -56,7 +56,6 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import app.winters.octo.design.CardEdge
 import app.winters.octo.design.scrollbar
 import app.winters.octo.design.CardFill
@@ -367,7 +366,7 @@ internal fun SwitchRow(title: String, caption: String?, on: Boolean, change: (Bo
 internal fun <T> ChoiceRow(title: String, caption: String?, options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
     val gap = Space.Xxl
     val below = Space.M
-    val least = ChoiceNameLeast
+    val least = SettingsSize.ChoiceNameLeast
     Layout(
         content = {
             Column {
@@ -403,10 +402,6 @@ internal fun <T> ChoiceRow(title: String, caption: String?, options: List<T>, se
         }
     }
 }
-
-// How wide a choice's name is kept at least, beside its choices, before
-// they go under it instead: room for a name and a short line under it.
-private val ChoiceNameLeast = 240.dp
 
 // A value along a line of a fixed width, with what it reads right beside
 // it. `live` sends the value while dragging; `onRelease` hears when a
