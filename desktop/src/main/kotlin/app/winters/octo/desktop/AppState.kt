@@ -85,6 +85,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import app.winters.octo.desktop.motion.MotionCovers
 import kotlinx.coroutines.launch
 import coil3.ImageLoader
 import okhttp3.OkHttpClient
@@ -243,6 +244,14 @@ class AppState(
 
     // Playlists' designed covers; Main gives them a folder in the cache.
     val playlistArt = PlaylistArtStore(http)
+
+    // Animated covers, where an album has one and the setting is on; Main
+    // gives them a folder in the cache.
+    val motionCovers = MotionCovers(
+        http,
+        settings.state.map { it.appearance.motionCovers }.stateIn(scope, SharingStarted.Eagerly, settings.current.appearance.motionCovers),
+        scope,
+    )
 
     // One quiet line at the top of the main area, for something the
     // listener should know once (never a stack of toasts).

@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.motion.MotionCoverArt
+import app.winters.octo.desktop.motion.motionArtist
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -19,7 +21,6 @@ import app.winters.octo.design.TextAction
 import app.winters.octo.design.Txt
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
-import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.LibraryShare
 import app.winters.octo.desktop.library.SongColumn
 import app.winters.octo.desktop.library.askableSongs
@@ -129,7 +130,7 @@ fun AlbumPage(app: AppState, visit: Visit, id: String) {
                     EntityHeader(
                         "Album",
                         album.name,
-                        picture = { Cover(album.coverArt, it, shape = Corner.ArtLShape, online = !inLibrary) },
+                        picture = { MotionCoverArt(album.coverArt, album.motionArtist(), album.name, it, shape = Corner.ArtLShape, online = !inLibrary) },
                         // No line at all for an album with no artist, rather than an empty one.
                         subtitle = artistName?.takeIf(String::isNotBlank)?.let { name -> { LinkText(name, album.artistId) { app.navigator.go(Page.Artist(it, album.artist)) } } },
                         facts = albumFacts(app, album, songs.size, songs.sumOf { it.duration }, format),

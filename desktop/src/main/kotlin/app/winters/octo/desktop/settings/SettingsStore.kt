@@ -269,6 +269,18 @@ data class Appearance(
     val textSize: Int = 0,
     // Playlists' pictures: designed for each one, or their album mosaics.
     val playlistCovers: PlaylistCoverStyle = PlaylistCoverStyle.Designed,
+    // Apple Music's moving covers in place of still ones, where an album
+    // has one (off unless asked).
+    val motionCovers: MotionCoverPrefs = MotionCoverPrefs(),
+)
+
+// Animated covers: whether they show, and the artwork server that finds
+// them (an apple-music-animated-artworks instance, by its address). Off,
+// or with no server, nothing is asked anywhere.
+@Serializable
+data class MotionCoverPrefs(
+    val enabled: Boolean = false,
+    val server: String = "",
 )
 
 // The window's colours: the playing cover blurred into a glow across the

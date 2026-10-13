@@ -4,3 +4,4 @@ mod decode;
 mod engine;
 mod lane;
 mod mixer;
+mod motion;

@@ -20,13 +20,14 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | `src/deck.rs` | One song decoding ahead on its own thread |
 | `src/decode.rs` | symphonia decoding, gapless trims, seeking, tags |
 | `src/opus.rs` | Opus through a pure Rust decoder |
+| `src/motion.rs` | Animated covers: H.264 in fragmented MP4, decoded by OpenH264 and handed out picture by picture in a loop |
 | `src/source/` | Files, and HTTP(S) streams with read-ahead and pinned certificates |
 | `src/sound/` | EQ, presets, limiter, balance, mono, ReplayGain |
 | `src/pace.rs` | Speed (pitch kept) and pitch shift |
 | `src/output/` | Device callback, audio clock, cpal and silent drivers |
 | `src/timeline.rs` | Which song and second each ring frame holds |
 | `bindings/kotlin/` | Generated Kotlin bindings |
-| `examples/` | `play` (manual testing), `bench` (CPU), `render_transition` (blends to WAVs, with checks), `bpm_check` (tempo against tags) |
+| `examples/` | `play` (manual testing), `bench` (CPU), `render_transition` (blends to WAVs, with checks), `bpm_check` (tempo against tags), `motion` (decodes an animated cover, with timings) |
 | `tools/make-fixtures/` | Makes the small mp3 and opus test files |
 
 <!-- markdownlint-enable MD013 -->

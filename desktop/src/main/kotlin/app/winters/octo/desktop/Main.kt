@@ -221,6 +221,7 @@ fun main(args: Array<String>) {
                 player.problem?.let { problem -> it.notice = problem }
             }
             app.playlistArt.folder = File(places.cache, "playlist-art")
+            app.motionCovers.art.folder = File(places.cache, "motion-covers")
             app.coverImages = { SingletonImageLoader.get(PlatformContext.INSTANCE) }
             // Kept songs carry on fetching, and play from this computer.
             app.offline.start()

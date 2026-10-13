@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.desktop.motion.LocalMotionCovers
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -168,6 +169,7 @@ fun Shell(app: AppState, frame: Frame?, onClose: () -> Unit) {
         LocalPopups provides app.popups,
         LocalPointer provides pointer,
         LocalCovers provides connection?.client,
+        LocalMotionCovers provides app.motionCovers,
         LocalKeyColour provides key,
         LocalDrag provides drag,
     ) {

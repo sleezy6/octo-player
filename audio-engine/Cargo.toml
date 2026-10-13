@@ -46,6 +46,9 @@ crossbeam-channel = "0.5.17"
 thiserror = "2.0.21"
 log = "0.4.34"
 uniffi = "0.32.2"
+# Animated covers: H.264, decoded by OpenH264 built from its bundled source
+# (in plain C where NASM is missing, which is fast enough for a cover).
+openh264 = "0.9.8"
 
 [dev-dependencies]
 # Reads the shared automix test vectors.

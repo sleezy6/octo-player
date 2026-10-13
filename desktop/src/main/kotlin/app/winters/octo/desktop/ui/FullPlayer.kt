@@ -48,7 +48,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
-import app.winters.octo.desktop.library.Cover
+import app.winters.octo.desktop.motion.MotionCoverArt
+import app.winters.octo.desktop.motion.motionArtist
 import app.winters.octo.desktop.library.lengthText
 import app.winters.octo.desktop.lyrics.LyricsMenuButton
 import app.winters.octo.desktop.lyrics.LyricsView
@@ -204,8 +205,10 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             val target = if (state.playing || still) 1f else 0.94f
             if (still) scale.snapTo(target) else scale.animateTo(target, tween(420))
         }
-        Cover(
+        MotionCoverArt(
             song.coverArt,
+            song.motionArtist(),
+            song.album,
             Modifier.size(side).graphicsLayer {
                 scaleX = scale.value
                 scaleY = scale.value

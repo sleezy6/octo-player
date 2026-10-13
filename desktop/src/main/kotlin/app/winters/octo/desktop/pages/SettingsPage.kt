@@ -151,6 +151,7 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
             wash { it.copy(brightnessCap = (20 + x * 80).roundToInt()) }
         }, live = false)
     }
+    MotionCoverGroup(app, settings)
     Group("Playlists") {
         ChoiceRow(PLAYLIST_COVERS_SETTING, playlistCoverStyleHelp(look.playlistCovers), PlaylistCoverStyle.entries, look.playlistCovers, ::playlistCoverStyleName) { style ->
             appearance { it.copy(playlistCovers = style) }

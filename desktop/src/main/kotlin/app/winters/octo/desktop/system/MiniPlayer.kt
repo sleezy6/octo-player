@@ -1,5 +1,8 @@
 package app.winters.octo.desktop.system
 
+import app.winters.octo.desktop.motion.LocalMotionCovers
+import app.winters.octo.desktop.motion.MotionCoverArt
+import app.winters.octo.desktop.motion.motionArtist
 import app.winters.octo.desktop.ui.MarkedTitle
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -221,7 +224,7 @@ fun MiniPlayerWindow(
                 }
         }
         ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard) {
-            CompositionLocalProvider(LocalCovers provides app.connection?.client) {
+            CompositionLocalProvider(LocalCovers provides app.connection?.client, LocalMotionCovers provides app.motionCovers) {
                 Box(Modifier.fillMaxSize()) {
                     MiniPlayerView(
                         app,
@@ -349,7 +352,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, pinn
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             val side = minOf(maxWidth, maxHeight)
             Box(Modifier.size(side)) {
-                Cover(song?.coverArt, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs, retry = true)
+                MotionCoverArt(song?.coverArt, song?.motionArtist(), song?.album, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs, retry = true)
                 // A soft shade at the top, so the buttons read on any cover.
                 Box(Modifier.fillMaxWidth().height(ControlHeight.L + Space.Xl).background(TopShade, Corner.ArtLShape))
                 Box(Modifier.align(Alignment.TopEnd).padding(Space.Xs)) { WindowButtons(pinned, bar = false, actions) }
