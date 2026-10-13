@@ -16,6 +16,9 @@ import app.winters.octo.design.PopupHost
 import app.winters.octo.desktop.audio.SoundTarget
 import app.winters.octo.desktop.health.HealthModel
 import app.winters.octo.desktop.home.HomeStore
+import app.winters.octo.desktop.home.KeptShelves
+import app.winters.octo.home.HomeShelfStore
+import app.winters.octo.home.homeSectionOrder
 import app.winters.octo.desktop.library.LibraryStore
 import app.winters.octo.desktop.listening.PlayReporter
 import app.winters.octo.desktop.livelists.LiveListStore
@@ -128,6 +131,9 @@ class AppState(
     private val listeningRoot: File? = null,
     // Looking for new versions of Octo; none in the tests and screenshots.
     val updates: DesktopUpdates? = null,
+    // Where Home's server shelves are kept for each account, or null to
+    // keep none (the tests and screenshots).
+    homeShelves: File? = null,
     // Opens a web page for the Import page; the screenshots open none.
     browse: (String) -> Unit = { openInBrowser(it) },
 ) {
@@ -219,6 +225,8 @@ class AppState(
     // The user's playlists, for the sidebar and "Add to playlist".
     var playlists by mutableStateOf<List<Playlist>>(emptyList())
         private set
+
+    private val keptShelves = homeShelves?.let { HomeShelfStore(it, KeptShelves.serializer()) }
 
     var sidePanel by mutableStateOf(SidePanel.of(settings.current.sidePanel))
         private set
@@ -449,8 +457,8 @@ class AppState(
         return ServerViews(
             store,
             if (connection.acquires) Fetches(connection.client, scope, onArrived = { store.load() }, onAsked = { downloads?.wake() }) else null,
-            SearchModel(connection, { store.index }, { playlists }, scope, { settings.current.libraryOnly }),
-            HomeStore(connection, scope),
+            SearchModel(connection, { store.index }, { playlists }, scope, { settings.current.libraryOnly }, store::takeIn),
+            HomeStore(connection, scope, kept = keptShelves, sections = { homeSectionOrder(settings.current.appearance.homeSections) }),
             // Any Octo server: whether it can look for FLACs is asked live,
             // since the extensions saved at sign-in may be older than it.
             // How the looking goes is the drawer's to show; only a refusal
@@ -691,10 +699,12 @@ class AppState(
 
     fun refreshPlaylists() {
         val client = connection?.client ?: return
+        val home = home
         scope.launch {
             try {
                 playlists = client.playlists()
                 playlistsReadAt = System.currentTimeMillis()
+                home?.playlistsAnswered(playlists)
             } catch (e: SubsonicException) {
                 // The sidebar keeps what it had.
             }
