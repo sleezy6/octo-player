@@ -184,10 +184,22 @@ class KeptCoverFetcher(
         for (size in keptCoverOrder(ask.bucket, anySize)) {
             val key = ask.keyAt(size)
             val snapshot = disk.openSnapshot(key) ?: continue
+            // A stand-in kept before Octo knew better is let go, and the
+            // cover asked for again.
+            if (isPlaceholder(disk, snapshot.data)) {
+                snapshot.close()
+                disk.remove(key)
+                continue
+            }
             return SourceFetchResult(ImageSource(snapshot.data, disk.fileSystem, key, snapshot, null), null, DataSource.DISK)
         }
         return null
     }
+
+    private fun isPlaceholder(disk: DiskCache, file: okio.Path): Boolean = runCatching {
+        val length = disk.fileSystem.metadata(file).size ?: return false
+        NavidromePlaceholder.mayBe(length) && NavidromePlaceholder.matches(disk.fileSystem.read(file) { readByteArray() })
+    }.getOrDefault(false)
 
     private suspend fun download(size: Int): FetchResult? {
         val plain = options.copy(
@@ -196,7 +208,13 @@ class KeptCoverFetcher(
         )
         val url = if (size == ask.bucket) data else ask.urlAt(size).toUri()
         val (fetcher, _) = loader.components.newFetcher(url, plain, loader) ?: return null
-        return fetcher.fetch()
+        val fetched = fetcher.fetch()
+        // The server's stand-in (CoverCacheStrategy saw no-store): not the cover.
+        if (TransientCovers.take(ask.keyAt(size))) {
+            (fetched as? SourceFetchResult)?.source?.close()
+            throw PlaceholderCover(ask.name)
+        }
+        return fetched
     }
 
     class Factory : Fetcher.Factory<Uri> {
@@ -264,7 +282,7 @@ fun coverLoader(context: PlatformContext, http: OkHttpClient, cacheDir: File): I
         .components {
             add(SmoothCoverDecoder.Factory())
             add(KeptCoverFetcher.Factory())
-            add(OkHttpNetworkFetcherFactory(callFactory = { covers }))
+            add(OkHttpNetworkFetcherFactory(callFactory = { covers }, cacheStrategy = { CoverCacheStrategy }))
         }
         .memoryCache { MemoryCache.Builder().maxSizeBytes(COVER_MEMORY_BYTES).build() }
         .diskCache {
@@ -388,6 +406,8 @@ fun Cover(
 class SmoothCoverDecoder(private val source: ImageSource, private val options: Options) : Decoder {
     override suspend fun decode(): DecodeResult {
         val bytes = source.source().use { it.readByteArray() }
+        // Navidrome's stand-in from a version that did not mark it: not the cover.
+        if (NavidromePlaceholder.matches(bytes)) throw PlaceholderCover("Navidrome's")
         val image = Image.makeFromEncoded(bytes)
         val (width, height) = shrunkSize(image.width, image.height, options)
         val bitmap = shrink(image, width, height)
