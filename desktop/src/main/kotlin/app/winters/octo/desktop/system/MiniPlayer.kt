@@ -352,7 +352,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, pinn
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             val side = minOf(maxWidth, maxHeight)
             Box(Modifier.size(side)) {
-                MotionCoverArt(song?.coverArt, song?.motionArtist(), song?.album, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs, retry = true)
+                MotionCoverArt(song?.coverArt, song?.albumId, song?.motionArtist(), song?.album, Modifier.fillMaxSize(), shape = Corner.ArtLShape, placeholder = OctoIcons.Songs, retry = true)
                 // A soft shade at the top, so the buttons read on any cover.
                 Box(Modifier.fillMaxWidth().height(ControlHeight.L + Space.Xl).background(TopShade, Corner.ArtLShape))
                 Box(Modifier.align(Alignment.TopEnd).padding(Space.Xs)) { WindowButtons(pinned, bar = false, actions) }

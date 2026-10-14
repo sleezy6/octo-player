@@ -197,8 +197,6 @@ object SettingsSize {
     // How wide a choice's name stays beside its choices before they go
     // under it (ChoiceRow).
     val ChoiceNameLeast = 240.dp
-    // A web address typed into a row, like the artwork server's.
-    val AddressField = 260.dp
     // The tile behind a section's icon at the top of its page.
     val SectionIcon = 36.dp
 

@@ -279,13 +279,13 @@ data class Appearance(
     val motionCovers: MotionCoverPrefs = MotionCoverPrefs(),
 )
 
-// Animated covers: whether they show, and the artwork server that finds
-// them (an apple-music-animated-artworks instance, by its address). Off,
-// or with no server, nothing is asked anywhere.
+// Animated covers: whether they show. The signed-in Octo server finds them
+// (octoAnimatedArtwork); off, or with a server that does not offer them,
+// nothing is asked. (An artwork server's address, kept here before, is
+// read past.)
 @Serializable
 data class MotionCoverPrefs(
     val enabled: Boolean = false,
-    val server: String = "",
     // Album grids (Albums, an artist's albums, Home's shelves): still, the
     // tile under the pointer moving, or every tile in sight moving.
     val grids: MotionGrids = MotionGrids.Hover,

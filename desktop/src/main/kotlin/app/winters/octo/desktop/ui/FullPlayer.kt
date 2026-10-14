@@ -207,6 +207,7 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
         }
         MotionCoverArt(
             song.coverArt,
+            song.albumId,
             song.motionArtist(),
             song.album,
             Modifier.size(side).graphicsLayer {

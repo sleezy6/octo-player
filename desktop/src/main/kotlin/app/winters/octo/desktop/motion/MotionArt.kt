@@ -1,6 +1,11 @@
 package app.winters.octo.desktop.motion
 
+import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.settings.MotionCoverPrefs
+import app.winters.octo.subsonic.OCTO_ANIMATED_ARTWORK
+import app.winters.octo.subsonic.SubsonicClient
+import androidx.compose.runtime.mutableStateMapOf
+import app.winters.octo.subsonic.animatedArtwork
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -8,7 +13,6 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
@@ -21,18 +25,18 @@ import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 // Finds an album's animated cover and keeps it on this computer. The
-// listener's artwork server (an apple-music-animated-artworks instance)
-// is asked for the album by its artist and name; it answers with Apple
-// Music's HLS playlist for the loop, or that there is none. The H.264 copy
-// nearest the size it is shown at is saved whole, a few megabytes, and
-// played from the file from then on: no stream stays open while it loops.
+// signed-in Octo server is asked for the album (octoAnimatedArtwork, by its
+// id, or its artist and name); it answers with Apple Music's HLS playlist
+// for the loop, or that there is none. The H.264 copy nearest the size it
+// is shown at is saved whole, a few megabytes, and played from the file
+// from then on: no stream stays open while it loops.
 //
-// Only the album's artist and name go to the artwork server; the loop
-// itself comes from Apple's servers. Nothing is asked while the setting is
-// off or no server is set.
+// The loop itself comes from Apple's servers. Nothing is asked while the
+// setting is off or the server does not offer animated covers.
 class MotionArt(
     private val http: OkHttpClient,
     private val prefs: () -> MotionCoverPrefs,
+    private val connection: () -> Connection?,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     // Where loops and lookups are kept; none (the tests and screenshots)
@@ -41,8 +45,8 @@ class MotionArt(
     var folder: File? = null
 
     // One lookup or download at a time for each album, and a few at once in
-    // all: a grid of albums asking together stays well inside what an
-    // artwork server allows (20 requests a second from one address).
+    // all: a grid of albums asking together stays well inside what the
+    // artwork server behind Octo allows (20 requests a second).
     private val locks = ConcurrentHashMap<String, Mutex>()
     private val asking = Semaphore(MAX_ASKING)
 
@@ -55,22 +59,45 @@ class MotionArt(
     // app runs.
     private val resting = ConcurrentHashMap<String, Long>()
 
+    // Whether the signed-in server offers animated covers: as it said at
+    // sign-in, or when asked since (`learn`), so a server that took them up
+    // after the listener signed in counts without signing in again.
+    fun offered(): Boolean {
+        val connection = connection() ?: return false
+        return connection.supports(OCTO_ANIMATED_ARTWORK) || learned[connection.client] == true
+    }
+
+    // What each signed-in client's server said of animated covers when
+    // asked; read by the window, so a change shows.
+    private val learned = mutableStateMapOf<SubsonicClient, Boolean>()
+
+    // Asks the server in use whether it offers animated covers now, once
+    // for each sign-in. Quietly nothing when it cannot be reached.
+    suspend fun learn(connection: Connection?) {
+        if (connection == null || connection.supports(OCTO_ANIMATED_ARTWORK) || connection.client in learned) return
+        val offers = runCatching { connection.client.extensions() }.getOrNull()
+            ?.any { it.name == OCTO_ANIMATED_ARTWORK && 1 in it.versions } ?: return
+        learned[connection.client] = offers
+    }
+
     // The loop for an album shown `px` pixels across, as a file ready to
-    // play, or null when it has none, the setting is off, or it cannot be
-    // had just now.
-    suspend fun loopFor(artist: String, album: String, px: Int): File? {
-        val settings = prefs()
-        if (!settings.enabled) return null
-        val server = artworkServer(settings.server) ?: return null
+    // play, or null when it has none, the setting is off, the server does
+    // not offer them, or it cannot be had just now. `albumId` is asked by
+    // when known (a library album or one found online); else its names.
+    suspend fun loopFor(albumId: String?, artist: String, album: String, px: Int): File? {
+        if (!prefs().enabled) return null
+        if (!offered()) return null
+        val connection = connection() ?: return null
         val folder = folder ?: return null
-        if (artist.isBlank() || album.isBlank()) return null
-        val key = lookupKey(server, artist, album)
+        if (albumId.isNullOrBlank() && (artist.isBlank() || album.isBlank())) return null
+        // The account, not a server id an older Octo may have left empty.
+        val key = lookupKey("${connection.server.username}@${connection.server.address}", albumId, artist, album)
         if ((resting[key] ?: 0) > now()) return null
         return locks.getOrPut(key) { Mutex() }.withLock {
             asking.withPermit {
                 withContext(Dispatchers.IO) {
                     try {
-                        load(folder, server, key, artist, album, px)
+                        load(folder, connection, key, albumId, artist, album, px)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -84,35 +111,9 @@ class MotionArt(
         }
     }
 
-    // Whether an artwork server answers at the address typed, for the
-    // settings: its own words on how it is, or the reason it cannot be
-    // reached. Asks only for its status, never about any album.
-    suspend fun check(typed: String): ServerCheck = withContext(Dispatchers.IO) {
-        val server = artworkServer(typed) ?: return@withContext ServerCheck(false, "That isn't a web address.")
-        val url = server.newBuilder().addPathSegments("api/v1/status").build()
-        try {
-            http.newCall(Request.Builder().url(url).build()).execute().use { response ->
-                when {
-                    response.code == 503 -> ServerCheck(true, "Connected. It's still starting up.")
-                    !response.isSuccessful -> ServerCheck(false, "It answered ${response.code}. Is this the artwork server's address?")
-                    else -> {
-                        val status = json.decodeFromString<ServerStatus>(response.body.string())
-                        val found = status.totalAnimatedEntries?.let { " It knows $it animated covers." }.orEmpty()
-                        if (status.status == "degraded") ServerCheck(true, "Connected, but Apple Music is limiting it for now.$found")
-                        else ServerCheck(true, "Connected.$found")
-                    }
-                }
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            ServerCheck(false, if (e is IOException) "Couldn't reach it: ${e.message}" else "That doesn't look like an artwork server.")
-        }
-    }
-
-    private fun load(folder: File, server: HttpUrl, key: String, artist: String, album: String, px: Int): File? {
+    private suspend fun load(folder: File, connection: Connection, key: String, albumId: String?, artist: String, album: String, px: Int): File? {
         folder.mkdirs()
-        val found = lookup(folder, key) ?: search(server, artist, album).also { remember(folder, key, it) }
+        val found = lookup(folder, key) ?: search(connection, albumId, artist, album).also { remember(folder, key, it) }
         val master = found.master?.toHttpUrlOrNull() ?: return null
         val variants = hlsVariants(masterPlaylist(folder, master), master)
         val variant = pickVariant(variants, px) ?: return null
@@ -126,22 +127,13 @@ class MotionArt(
         return file
     }
 
-    // What the artwork server says about the album: its playlist, or none.
-    // Throws IOException when it cannot say just now.
-    private fun search(server: HttpUrl, artist: String, album: String): Lookup {
-        val url = server.newBuilder()
-            .addPathSegments("api/v1/artwork/search")
-            .addQueryParameter("artist", artist)
-            .addQueryParameter("album", album)
-            .build()
-        http.newCall(Request.Builder().url(url).build()).execute().use { response ->
-            if (response.code == 404) return Lookup(null, now())
-            if (!response.isSuccessful) throw IOException("artwork server answered ${response.code}")
-            val answer = json.decodeFromString<ArtworkAnswer>(response.body.string())
-            // The square loop is the one that fits a cover; an album with
-            // only the tall one has none to show here.
-            return Lookup(answer.url?.takeIf(String::isNotBlank), now())
-        }
+    // What the server says about the album: its playlist, or none. Throws
+    // when it cannot say just now.
+    private suspend fun search(connection: Connection, albumId: String?, artist: String, album: String): Lookup {
+        val found = connection.client.animatedArtwork(albumId, artist, album)
+        // The square loop is the one that fits a cover; an album with only
+        // the tall one has none to show here.
+        return Lookup(found?.url?.takeIf(String::isNotBlank), now())
     }
 
     // The master playlist, kept beside the loops so a loop already saved
@@ -251,37 +243,12 @@ class MotionArt(
 @Serializable
 internal data class Lookup(val master: String? = null, val atMs: Long = 0)
 
-// What the artwork server answers when it has a loop.
-@Serializable
-internal data class ArtworkAnswer(
-    val url: String? = null,
-    @SerialName("url_tall") val urlTall: String? = null,
-    val artist: String? = null,
-    val album: String? = null,
-)
-
-// The artwork server's status, as far as the settings show it.
-@Serializable
-internal data class ServerStatus(val status: String? = null, val totalAnimatedEntries: Long? = null)
-
-// What checking an artwork server found, in words for the settings.
-data class ServerCheck(val ok: Boolean, val words: String)
-
 private val json = Json { ignoreUnknownKeys = true }
 
-// The artwork server's address as typed: "artwork.example.com" is taken
-// as HTTPS; one on the home network may say http:// itself. Null when it
-// is not an address.
-fun artworkServer(typed: String): HttpUrl? {
-    val text = typed.trim().trimEnd('/')
-    if (text.isEmpty()) return null
-    val withScheme = if ("://" in text) text else "https://$text"
-    return withScheme.toHttpUrlOrNull()?.takeIf { it.scheme == "http" || it.scheme == "https" }
-}
-
-// An album's lookup is kept under its server and its names, in any case.
-internal fun lookupKey(server: HttpUrl, artist: String, album: String): String =
-    "${server.host}:${server.port}${server.encodedPath}|${artist.trim().lowercase()}|${album.trim().lowercase()}"
+// An album's lookup is kept under its server and its id, or its names in
+// any case when it has none.
+internal fun lookupKey(server: String, albumId: String?, artist: String, album: String): String =
+    if (!albumId.isNullOrBlank()) "$server|id|$albumId" else "$server|${artist.trim().lowercase()}|${album.trim().lowercase()}"
 
 private fun hash(text: String): String =
     MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }.take(32)

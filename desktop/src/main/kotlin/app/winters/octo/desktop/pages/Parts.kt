@@ -121,6 +121,7 @@ fun AlbumCard(app: AppState, album: Album, modifier: Modifier = Modifier, outsid
         picture = if (grids == MotionGrids.Off) null else { { picture, shape ->
             MotionCoverArt(
                 album.coverArt,
+                album.id,
                 album.motionArtist(),
                 album.name,
                 picture,

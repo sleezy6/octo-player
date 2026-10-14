@@ -259,6 +259,7 @@ class AppState(
         http,
         settings.state.map { it.appearance.motionCovers }.stateIn(scope, SharingStarted.Eagerly, settings.current.appearance.motionCovers),
         scope,
+        connection = { connection },
     )
 
     // One quiet line at the top of the main area, for something the

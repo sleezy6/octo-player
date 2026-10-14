@@ -16,6 +16,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +33,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.artworkRim
 import app.winters.octo.design.motionScale
 import app.winters.octo.desktop.library.Cover
+import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.settings.MotionCoverPrefs
 import app.winters.octo.desktop.ui.LocalWindowShown
 import app.winters.octo.player.immersive.CoverFadeMs
@@ -64,8 +66,18 @@ import java.util.concurrent.ConcurrentHashMap
 // Animated covers for the whole app: finding and keeping them (MotionArt),
 // and the loops playing now, each decoded once however many places show
 // it (the full player and the mini player at once, say).
-class MotionCovers(http: OkHttpClient, val prefs: StateFlow<MotionCoverPrefs>, private val scope: CoroutineScope) {
-    val art = MotionArt(http, { prefs.value })
+class MotionCovers(
+    http: OkHttpClient,
+    val prefs: StateFlow<MotionCoverPrefs>,
+    private val scope: CoroutineScope,
+    connection: () -> Connection? = { null },
+) {
+    val art = MotionArt(http, { prefs.value }, connection)
+
+    init {
+        // Each server signed in to is asked once whether it offers them.
+        scope.launch { snapshotFlow { connection() }.collect { art.learn(it) } }
+    }
 
     private val playing = ConcurrentHashMap<File, Flow<Image>>()
 
@@ -156,6 +168,7 @@ fun Album.motionArtist(): String? = (displayArtist ?: artist).takeIf(String::isN
 @Composable
 fun MotionCoverArt(
     coverId: String?,
+    albumId: String?,
     artist: String?,
     album: String?,
     modifier: Modifier = Modifier,
@@ -169,28 +182,28 @@ fun MotionCoverArt(
     Box(modifier) {
         Cover(coverId, Modifier.fillMaxSize(), shape = shape, online = online, placeholder = placeholder, retry = retry)
         val covers = LocalMotionCovers.current
-        if (covers != null && artist != null && album != null) {
+        if (covers != null && (albumId != null || (artist != null && album != null))) {
             // Kept a moment after playing stops, while the loop fades out.
             var fading by remember { mutableStateOf(false) }
             LaunchedEffect(playing) { if (playing) fading = true }
-            if (playing || fading) Loop(covers, artist, album, shape, playing, settleMs) { fading = false }
+            if (playing || fading) Loop(covers, albumId, artist.orEmpty(), album.orEmpty(), shape, playing, settleMs) { fading = false }
         }
     }
 }
 
 @Composable
-private fun Loop(covers: MotionCovers, artist: String, album: String, shape: Shape, playing: Boolean, settleMs: Long, gone: () -> Unit) {
+private fun Loop(covers: MotionCovers, albumId: String?, artist: String, album: String, shape: Shape, playing: Boolean, settleMs: Long, gone: () -> Unit) {
     val prefs by covers.prefs.collectAsState()
     val still = LocalReduceMotion.current || !LocalWindowShown.current
-    if (!prefs.enabled || prefs.server.isBlank() || still || album.isBlank()) return
+    if (!prefs.enabled || !covers.art.offered() || still) return
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val loopPx = loopSize(with(LocalDensity.current) { maxOf(maxWidth, maxHeight).roundToPx() })
         // Everything below starts afresh for another album, so the last
         // album's loop never shows while the next one's is found.
-        key(artist, album, loopPx, prefs.server) {
+        key(albumId, artist, album, loopPx) {
             val file by produceState<File?>(null) {
                 if (settleMs > 0) delay(settleMs)
-                value = covers.art.loopFor(artist, album, loopPx)
+                value = covers.art.loopFor(albumId, artist, album, loopPx)
             }
             val loop = file
             if (loop != null) {

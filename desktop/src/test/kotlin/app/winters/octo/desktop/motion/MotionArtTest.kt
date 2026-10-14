@@ -1,16 +1,16 @@
 package app.winters.octo.desktop.motion
 
+import app.winters.octo.desktop.FakeServer
+import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.settings.MotionCoverPrefs
+import app.winters.octo.subsonic.OCTO_ANIMATED_ARTWORK
 import kotlinx.coroutines.runBlocking
-import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
-import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
-import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
@@ -19,48 +19,44 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-// Finding and keeping animated covers, against a pretend artwork server
-// that also plays Apple's part: the playlists and the loop's file, served
-// in byte ranges as Apple serves them. Never the real ones.
+// Finding and keeping animated covers, against a pretend Octo server that
+// offers them (octoAnimatedArtwork) and also plays Apple's part: the
+// playlists and the loop's file, served in byte ranges as Apple serves
+// them. Never the real ones.
 class MotionArtTest {
     @get:Rule val folder = TemporaryFolder()
-    private val server = MockWebServer()
-    private val calls = CopyOnWriteArrayList<RecordedRequest>()
+    private val server = FakeServer()
     private var prefs = MotionCoverPrefs(enabled = true)
     private var clock = 1_000_000L
 
     // The loop's file: a setup part then two segments, as one file.
     private val loop = Random(7).nextBytes(10_000)
-    private var hasLoop = true
-    private var searchCode = 200
+
+    // What getAnimatedArtwork answers: the loop, none, or a failure.
+    private enum class Answer { Loop, None, NotFound, Unavailable }
+    private var answer = Answer.Loop
 
     init {
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                calls += request
-                val path = request.url.encodedPath
-                return when {
-                    path.endsWith("/api/v1/artwork/search") -> when {
-                        searchCode != 200 -> MockResponse.Builder().code(searchCode).build()
-                        !hasLoop -> MockResponse.Builder().code(404).body("""{"message":"No animated artwork found."}""").build()
-                        else -> MockResponse.Builder().body(
-                            """{"url":"${server.url("/assets/P1_default.m3u8")}","url_tall":null,"artist":"LINKIN PARK","album":"LIVING THINGS","isCached":true}""",
-                        ).build()
-                    }
-                    path == "/assets/P1_default.m3u8" -> text(MASTER)
-                    path == "/assets/small/P1_486.m3u8" -> text(media("P1_486-.mp4"))
-                    path == "/assets/big/P1_1080.m3u8" -> text(media("P1_1080-.mp4"))
-                    path.endsWith("-.mp4") -> ranged(request)
-                    else -> MockResponse.Builder().code(404).build()
-                }
+        server.answerBy("getAnimatedArtwork") {
+            when (answer) {
+                Answer.Loop -> server.ok(""""animatedArtwork":{"url":"${server.address}assets/P1_default.m3u8","urlTall":"${server.address}assets/P1_tall.m3u8"}""")
+                Answer.None -> server.ok()
+                Answer.NotFound -> failed(70, "Album not found")
+                Answer.Unavailable -> failed(0, "The animated artwork server did not answer; try again later")
             }
         }
-        server.start()
-        prefs = prefs.copy(server = server.url("/").toString())
+        server.respondBy("P1_default.m3u8") { text(MASTER) }
+        server.respondBy("P1_486.m3u8") { text(media("P1_486-.mp4")) }
+        server.respondBy("P1_1080.m3u8") { text(media("P1_1080-.mp4")) }
+        server.respondBy("P1_486-.mp4", ::ranged)
+        server.respondBy("P1_1080-.mp4", ::ranged)
     }
 
     @After
     fun close() = server.close()
+
+    private fun failed(code: Int, message: String) =
+        """{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":$code,"message":"$message"}}}"""
 
     private fun text(body: String) = MockResponse.Builder().body(body).build()
 
@@ -85,100 +81,153 @@ class MotionArtTest {
         #EXT-X-ENDLIST
     """.trimIndent()
 
-    private fun art(withFolder: Boolean = true) = MotionArt(OkHttpClient(), { prefs }, { clock }).also {
+    private val offering = server.connection(listOf("$OCTO_ANIMATED_ARTWORK:1"))
+    private var connection: Connection? = offering
+
+    private fun art(withFolder: Boolean = true) = MotionArt(OkHttpClient(), { prefs }, { connection }, { clock }).also {
         if (withFolder) it.folder = folder.root
     }
 
-    private fun searches() = calls.count { it.url.encodedPath.endsWith("/search") }
-    private fun downloads() = calls.count { it.url.encodedPath.endsWith("-.mp4") }
+    private fun asks() = server.calls.filter { it.url.pathSegments.last() == "getAnimatedArtwork" }
+    private fun downloads() = server.calls.filter { it.url.pathSegments.last().endsWith("-.mp4") }
 
     @Test
     fun savesTheLoopWholeFromItsRanges(): Unit = runBlocking {
-        val file = assertNotNull(art().loopFor("Linkin Park", "Living Things", 400))
+        val file = assertNotNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
         assertContentEquals(loop, file.readBytes())
         // The three ranges of one file come as one request.
-        assertEquals(1, downloads())
-        assertEquals("bytes=0-9999", calls.last { it.url.encodedPath.endsWith("-.mp4") }.headers["Range"])
+        assertEquals(1, downloads().size)
+        assertEquals("bytes=0-9999", downloads().last().headers["Range"])
     }
 
     @Test
-    fun asksForTheAlbumByItsNamesOnly(): Unit = runBlocking {
-        art().loopFor("Linkin Park", "Living Things", 400)
-        val search = calls.first { it.url.encodedPath.endsWith("/search") }.url
-        assertEquals("Linkin Park", search.queryParameter("artist"))
-        assertEquals("Living Things", search.queryParameter("album"))
-        assertEquals(setOf("artist", "album"), search.queryParameterNames)
+    fun asksTheServerByTheAlbumsId(): Unit = runBlocking {
+        art().loopFor("al-1", "Linkin Park", "Living Things", 400)
+        val ask = asks().single().url
+        assertEquals("al-1", ask.queryParameter("id"))
+        assertNull(ask.queryParameter("artist"))
+        assertNull(ask.queryParameter("album"))
+    }
+
+    @Test
+    fun withoutAnIdItAsksByTheNames(): Unit = runBlocking {
+        art().loopFor(null, "Linkin Park", "Living Things", 400)
+        val ask = asks().single().url
+        assertEquals("Linkin Park", ask.queryParameter("artist"))
+        assertEquals("Living Things", ask.queryParameter("album"))
+        assertNull(ask.queryParameter("id"))
     }
 
     @Test
     fun picksTheCopyForTheSizeShown(): Unit = runBlocking {
-        art().loopFor("Linkin Park", "Living Things", 400)
-        art().loopFor("Linkin Park", "Living Things", 900)
-        val files = calls.filter { it.url.encodedPath.endsWith("-.mp4") }.map { it.url.pathSegments.last() }
-        assertEquals(listOf("P1_486-.mp4", "P1_1080-.mp4"), files)
+        art().loopFor("al-1", "Linkin Park", "Living Things", 400)
+        art().loopFor("al-1", "Linkin Park", "Living Things", 900)
+        assertEquals(listOf("P1_486-.mp4", "P1_1080-.mp4"), downloads().map { it.url.pathSegments.last() })
     }
 
     @Test
     fun aSavedLoopPlaysWithoutAskingAnyone(): Unit = runBlocking {
-        art().loopFor("Linkin Park", "Living Things", 400)
-        val before = calls.size
+        art().loopFor("al-1", "Linkin Park", "Living Things", 400)
+        val before = server.calls.size
         // A new app run: the lookup and the playlist come from the folder.
-        val again = assertNotNull(art().loopFor("linkin park ", "LIVING THINGS", 400))
+        val again = assertNotNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
         assertContentEquals(loop, again.readBytes())
-        assertEquals(before, calls.size)
+        assertEquals(before, server.calls.size)
     }
 
     @Test
     fun anAlbumWithoutOneIsNotAskedAboutAgainForAWeek(): Unit = runBlocking {
-        hasLoop = false
+        answer = Answer.None
         val art = art()
-        assertNull(art.loopFor("Someone", "Plain Album", 400))
-        assertNull(art.loopFor("Someone", "Plain Album", 400))
-        assertEquals(1, searches())
+        assertNull(art.loopFor("al-2", "Someone", "Plain Album", 400))
+        assertNull(art.loopFor("al-2", "Someone", "Plain Album", 400))
+        assertEquals(1, asks().size)
         clock += MotionArt.NONE_FOR_MS + 1
-        hasLoop = true
-        assertNotNull(art.loopFor("Someone", "Plain Album", 400))
-        assertEquals(2, searches())
+        answer = Answer.Loop
+        assertNotNull(art.loopFor("al-2", "Someone", "Plain Album", 400))
+        assertEquals(2, asks().size)
     }
 
     @Test
-    fun aServerThatFailsIsLeftAloneAWhile(): Unit = runBlocking {
-        searchCode = 503
+    fun anAlbumTheServerDoesNotKnowHasNone(): Unit = runBlocking {
+        answer = Answer.NotFound
         val art = art()
-        assertNull(art.loopFor("Linkin Park", "Living Things", 400))
-        assertNull(art.loopFor("Linkin Park", "Living Things", 400))
-        assertEquals(1, searches())
-        // A failure is not remembered as "none": once rested, it asks again.
-        searchCode = 200
-        clock += MotionArt.RETRY_AFTER_MS + 1
-        assertNotNull(art.loopFor("Linkin Park", "Living Things", 400))
+        assertNull(art.loopFor("al-gone", "Someone", "Gone", 400))
+        assertNull(art.loopFor("al-gone", "Someone", "Gone", 400))
+        assertEquals(1, asks().size)
     }
 
     @Test
-    fun nothingIsAskedWhileOff(): Unit = runBlocking {
+    fun aServerThatCannotSayIsLeftAloneAWhile(): Unit = runBlocking {
+        answer = Answer.Unavailable
+        val art = art()
+        assertNull(art.loopFor("al-1", "Linkin Park", "Living Things", 400))
+        assertNull(art.loopFor("al-1", "Linkin Park", "Living Things", 400))
+        assertEquals(1, asks().size)
+        // A failure is not remembered as "none": once rested, it asks again.
+        answer = Answer.Loop
+        clock += MotionArt.RETRY_AFTER_MS + 1
+        assertNotNull(art.loopFor("al-1", "Linkin Park", "Living Things", 400))
+    }
+
+    @Test
+    fun nothingIsAskedWhileOffOrNotOffered(): Unit = runBlocking {
         prefs = prefs.copy(enabled = false)
-        assertNull(art().loopFor("Linkin Park", "Living Things", 400))
-        prefs = prefs.copy(enabled = true, server = "")
-        assertNull(art().loopFor("Linkin Park", "Living Things", 400))
-        assertTrue(calls.isEmpty())
+        assertNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
+        prefs = prefs.copy(enabled = true)
+        connection = server.connection(listOf("octoLyrics:1"))
+        assertNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
+        connection = null
+        assertNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
+        assertTrue(server.calls.isEmpty())
+    }
+
+    @Test
+    fun offeredFollowsTheSignedInServer() {
+        val art = art()
+        assertTrue(art.offered())
+        connection = server.connection()
+        assertTrue(!art.offered())
+    }
+
+    // Signed in before the server took animated covers up: asking it once
+    // finds them, without signing in again.
+    @Test
+    fun aServerThatTookThemUpSinceSignInIsAsked(): Unit = runBlocking {
+        server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"octoLyrics","versions":[1]},{"name":"$OCTO_ANIMATED_ARTWORK","versions":[1]}]""")
+        connection = server.connection(listOf("octoLyrics:1"))
+        val art = art()
+        assertTrue(!art.offered())
+        art.learn(connection)
+        assertTrue(art.offered())
+        assertNotNull(art.loopFor("al-1", "Linkin Park", "Living Things", 400))
+        // Asked once for this sign-in.
+        art.learn(connection)
+        assertEquals(1, server.calls.count { it.url.pathSegments.last() == "getOpenSubsonicExtensions" })
+    }
+
+    @Test
+    fun aServerThatStillDoesNotStaysOff(): Unit = runBlocking {
+        server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"octoLyrics","versions":[1]}]""")
+        connection = server.connection(listOf("octoLyrics:1"))
+        val art = art()
+        art.learn(connection)
+        assertTrue(!art.offered())
+        assertNull(art.loopFor("al-1", "Linkin Park", "Living Things", 400))
     }
 
     @Test
     fun nothingIsKeptWithoutAFolder(): Unit = runBlocking {
-        assertNull(art(withFolder = false).loopFor("Linkin Park", "Living Things", 400))
-        assertTrue(calls.isEmpty())
+        assertNull(art(withFolder = false).loopFor("al-1", "Linkin Park", "Living Things", 400))
+        assertTrue(server.calls.isEmpty())
     }
 
+    // A settings file from before, with the artwork server's address, still reads.
     @Test
-    fun aServerUnderAPathKeepsItsPath() {
-        val base = assertNotNull(artworkServer("https://example.com/artwork/"))
-        val search = base.newBuilder().addPathSegments("api/v1/artwork/search").build()
-        assertEquals("/artwork/api/v1/artwork/search", search.encodedPath)
-        val bare = assertNotNull(artworkServer("example.com"))
-        assertEquals("https://example.com/api/v1/artwork/search", bare.newBuilder().addPathSegments("api/v1/artwork/search").build().toString())
-        assertEquals("http", artworkServer("http://192.168.1.20:8080")!!.scheme)
-        assertNull(artworkServer("  "))
-        assertNull(artworkServer("ftp://example.com"))
+    fun anOldSettingsFileStillReads() {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val read = json.decodeFromString(MotionCoverPrefs.serializer(), """{"enabled":true,"server":"https://artwork.example.com","grids":"Always"}""")
+        assertEquals(MotionCoverPrefs(enabled = true, grids = app.winters.octo.desktop.settings.MotionGrids.Always), read)
     }
 
     companion object {
