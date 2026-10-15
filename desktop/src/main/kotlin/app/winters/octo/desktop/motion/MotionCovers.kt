@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -232,6 +233,56 @@ private fun Playing(covers: MotionCovers, loop: File, shape: Shape, playing: Boo
         drawIntoCanvas { canvas -> canvas.nativeCanvas.drawImageRect(image, centreSquare(image), Rect.makeWH(size.width, size.height), Smooth, null, true) }
     }
     Box(Modifier.fillMaxSize().artworkRim(shape).graphicsLayer { alpha = shown })
+}
+
+// The tall loop's picture of the moment, for an album shown `widthPx`
+// across: Apple's 3:4 loop made for a whole screen. Read it where it is
+// drawn, so a new picture redraws only that. It holds none while there is
+// none to show: the album has no tall loop, it is still being fetched, the
+// setting is off, the server does not offer them, motion is reduced, or
+// the window is out of sight.
+@Composable
+fun rememberTallLoop(albumId: String?, artist: String?, album: String?, widthPx: Int): State<Image?> {
+    val covers = LocalMotionCovers.current ?: return NoPicture
+    val prefs by covers.prefs.collectAsState()
+    val still = LocalReduceMotion.current || !LocalWindowShown.current
+    if (!prefs.enabled || !covers.art.offered() || still) return NoPicture
+    if (albumId == null && (artist == null || album == null)) return NoPicture
+    val px = loopSize(widthPx)
+    return key(albumId, artist, album, px) {
+        val file by produceState<File?>(null) { value = covers.art.loopFor(albumId, artist.orEmpty(), album.orEmpty(), px, tall = true) }
+        val loop = file
+        if (loop == null) {
+            NoPicture
+        } else {
+            produceState<Image?>(null, loop) { covers.frames(loop).collect { value = it } }
+        }
+    }
+}
+
+private val NoPicture: State<Image?> = mutableStateOf(null)
+
+// A tall loop's picture filling its box, cropped about its middle to the
+// box's shape. `image` is read as it is drawn.
+@Composable
+fun TallLoopPicture(image: () -> Image?, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val picture = image() ?: return@Canvas
+        drawIntoCanvas { canvas -> canvas.nativeCanvas.drawImageRect(picture, cropTo(picture, size.width / size.height), Rect.makeWH(size.width, size.height), Smooth, null, true) }
+    }
+}
+
+// The middle of a picture at `aspect` (width over height).
+private fun cropTo(image: Image, aspect: Float): Rect {
+    val width = image.width.toFloat()
+    val height = image.height.toFloat()
+    return if (width / height > aspect) {
+        val w = height * aspect
+        Rect.makeXYWH((width - w) / 2, 0f, w, height)
+    } else {
+        val h = width / aspect
+        Rect.makeXYWH(0f, (height - h) / 2, width, h)
+    }
 }
 
 private val Smooth = FilterMipmap(FilterMode.LINEAR, MipmapMode.NONE)

@@ -40,13 +40,14 @@ class MotionArtTest {
     // What getAnimatedArtwork answers: the loop as a path on the server
     // (Octo relaying it), the loop at a full address (an older Octo), none,
     // or a failure.
-    private enum class Answer { Loop, FullAddress, None, NotFound, Unavailable }
+    private enum class Answer { Loop, SquareOnly, FullAddress, None, NotFound, Unavailable }
     private var answer = Answer.Loop
 
     init {
         server.answerBy("getAnimatedArtwork") {
             when (answer) {
                 Answer.Loop -> server.ok(""""animatedArtwork":{"url":"animated-artwork/k3y/square.m3u8","urlTall":"animated-artwork/k3y/tall.m3u8"}""")
+                Answer.SquareOnly -> server.ok(""""animatedArtwork":{"url":"animated-artwork/k3y/square.m3u8"}""")
                 Answer.FullAddress -> server.ok(""""animatedArtwork":{"url":"${server.address}assets/P1_default.m3u8"}""")
                 Answer.None -> server.ok()
                 Answer.NotFound -> failed(70, "Album not found")
@@ -54,6 +55,9 @@ class MotionArtTest {
             }
         }
         server.respondBy("square.m3u8") { text(MASTER) }
+        server.respondBy("tall.m3u8") { text(MASTER_TALL) }
+        server.respondBy("T_1080.m3u8") { text(media("T_1080-.mp4")) }
+        server.respondBy("T_1080-.mp4", ::ranged)
         server.respondBy("P1_default.m3u8") { text(MASTER) }
         server.respondBy("P1_486.m3u8") { text(media("P1_486-.mp4")) }
         server.respondBy("P1_1080.m3u8") { text(media("P1_1080-.mp4")) }
@@ -281,6 +285,43 @@ class MotionArtTest {
         assertEquals(1, downloads().size)
     }
 
+    // The tall loop, for the full player: its own playlist and file.
+    @Test
+    fun theTallLoopIsItsOwn(): Unit = runBlocking {
+        val art = art()
+        val square = assertNotNull(art.loopFor("al-1", "Linkin Park", "Living Things", 400))
+        val tall = assertNotNull(art.loopFor("al-1", "Linkin Park", "Living Things", 900, tall = true))
+        assertTrue(square != tall)
+        assertContentEquals(loop, tall.readBytes())
+        assertTrue(server.calls.any { it.url.encodedPath == "/animated-artwork/k3y/tall.m3u8" })
+        assertEquals(listOf("P1_486-.mp4", "T_1080-.mp4"), downloads().map { it.url.pathSegments.last() })
+        // One lookup answers both.
+        assertEquals(1, asks().size)
+    }
+
+    @Test
+    fun anAlbumWithOnlyASquareLoopHasNoTallOne(): Unit = runBlocking {
+        answer = Answer.SquareOnly
+        val art = art()
+        assertNull(art.loopFor("al-1", "Linkin Park", "Living Things", 900, tall = true))
+        assertNotNull(art.loopFor("al-1", "Linkin Park", "Living Things", 400))
+        assertEquals(1, asks().size)
+    }
+
+    // A lookup kept before tall loops were says nothing of them: asked once more.
+    @Test
+    fun aLookupFromBeforeIsAskedAgainForTheTallLoop(): Unit = runBlocking {
+        val key = lookupKey("winters@${server.address}", "al-1", "Linkin Park", "Living Things")
+        File(folder.root, MotionArt.LOOKUPS_FILE).writeText("""{"$key":{"master":"animated-artwork/k3y/square.m3u8","atMs":$clock}}""")
+        val art = art()
+        assertNotNull(art.loopFor("al-1", "Linkin Park", "Living Things", 400))
+        assertEquals(0, asks().size)
+        assertNotNull(art.loopFor("al-1", "Linkin Park", "Living Things", 900, tall = true))
+        assertEquals(1, asks().size)
+        assertNotNull(art.loopFor("al-1", "Linkin Park", "Living Things", 900, tall = true))
+        assertEquals(1, asks().size)
+    }
+
     @Test
     fun nothingIsKeptWithoutAFolder(): Unit = runBlocking {
         assertNull(art(withFolder = false).loopFor("al-1", "Linkin Park", "Living Things", 400))
@@ -296,6 +337,13 @@ class MotionArtTest {
     }
 
     companion object {
+        // The tall loop: 3:4, one H.264 copy.
+        val MASTER_TALL = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:AVERAGE-BANDWIDTH=5000000,BANDWIDTH=6000000,VIDEO-RANGE=SDR,CODECS="avc1.640028",RESOLUTION=1080x1440
+            T_1080.m3u8
+        """.trimIndent()
+
         // Two H.264 copies and an HEVC one, which is never picked.
         val MASTER = """
             #EXTM3U

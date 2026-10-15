@@ -81,11 +81,13 @@ class MotionArt(
         learned[connection.client] = offers
     }
 
-    // The loop for an album shown `px` pixels across, as a file ready to
-    // play, or null when it has none, the setting is off, the server does
-    // not offer them, or it cannot be had just now. `albumId` is asked by
-    // when known (a library album or one found online); else its names.
-    suspend fun loopFor(albumId: String?, artist: String, album: String, px: Int): File? {
+    // The loop for an album shown `px` pixels across (its narrower side), as
+    // a file ready to play, or null when it has none, the setting is off,
+    // the server does not offer them, or it cannot be had just now.
+    // `albumId` is asked by when known (a library album or one found
+    // online); else its names. `tall`: the 3:4 loop Apple makes for a
+    // whole screen, rather than the square one; many albums have only one.
+    suspend fun loopFor(albumId: String?, artist: String, album: String, px: Int, tall: Boolean = false): File? {
         if (!prefs().enabled) return null
         if (!offered()) return null
         val connection = connection() ?: return null
@@ -98,7 +100,7 @@ class MotionArt(
             asking.withPermit {
                 withContext(Dispatchers.IO) {
                     try {
-                        load(folder, connection, key, albumId, artist, album, px)
+                        load(folder, connection, key, albumId, artist, album, px, tall)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -112,12 +114,15 @@ class MotionArt(
         }
     }
 
-    private suspend fun load(folder: File, connection: Connection, key: String, albumId: String?, artist: String, album: String, px: Int): File? {
+    private suspend fun load(folder: File, connection: Connection, key: String, albumId: String?, artist: String, album: String, px: Int, tall: Boolean): File? {
         folder.mkdirs()
-        val found = lookup(folder, key) ?: search(connection, albumId, artist, album).also { remember(folder, key, it) }
+        // A lookup kept before the tall loop was kept too says nothing of it,
+        // so the tall one is asked for again.
+        val found = lookup(folder, key)?.takeIf { !tall || it.tallKnown }
+            ?: search(connection, albumId, artist, album).also { remember(folder, key, it) }
         // A path on the server, made whole against the address in use (an
         // address in full, from an older Octo, stays as it is).
-        val master = found.master?.let(connection.client::resolve) ?: return null
+        val master = (if (tall) found.masterTall else found.master)?.let(connection.client::resolve) ?: return null
         val http = connection.client.serverHttp
         val variants = hlsVariants(masterPlaylist(http, folder, master, connection), master)
         val variant = pickVariant(variants, px) ?: return null
@@ -139,13 +144,17 @@ class MotionArt(
         return if (base.isNotEmpty() && text.startsWith(base)) text.removePrefix(base) else text
     }
 
-    // What the server says about the album: its playlist, or none. Throws
-    // when it cannot say just now.
+    // What the server says about the album: its square and tall
+    // playlists, either or both of which may be missing. Throws when it
+    // cannot say just now.
     private suspend fun search(connection: Connection, albumId: String?, artist: String, album: String): Lookup {
         val found = connection.client.animatedArtwork(albumId, artist, album)
-        // The square loop is the one that fits a cover; an album with only
-        // the tall one has none to show here.
-        return Lookup(found?.url?.takeIf(String::isNotBlank), now())
+        return Lookup(
+            master = found?.url?.takeIf(String::isNotBlank),
+            atMs = now(),
+            masterTall = found?.urlTall?.takeIf(String::isNotBlank),
+            tallKnown = true,
+        )
     }
 
     // The master playlist, kept beside the loops so a loop already saved
@@ -203,7 +212,7 @@ class MotionArt(
     private fun lookup(folder: File, key: String): Lookup? {
         val found = synchronized(lookupsLock) { lookups(folder)[key] } ?: return null
         val age = now() - found.atMs
-        val fresh = if (found.master != null) FOUND_FOR_MS else NONE_FOR_MS
+        val fresh = if (found.master != null || found.masterTall != null) FOUND_FOR_MS else NONE_FOR_MS
         return found.takeIf { age in 0 until fresh }
     }
 
@@ -250,10 +259,16 @@ class MotionArt(
     }
 }
 
-// One album's lookup: the master playlist's address, or null for none,
-// and when it was asked.
+// One album's lookup: the square and tall master playlists' addresses, or
+// null for none, and when it was asked. `tallKnown` is false for a lookup
+// kept before the tall one was, which says nothing of it.
 @Serializable
-internal data class Lookup(val master: String? = null, val atMs: Long = 0)
+internal data class Lookup(
+    val master: String? = null,
+    val atMs: Long = 0,
+    val masterTall: String? = null,
+    val tallKnown: Boolean = false,
+)
 
 private val json = Json { ignoreUnknownKeys = true }
 

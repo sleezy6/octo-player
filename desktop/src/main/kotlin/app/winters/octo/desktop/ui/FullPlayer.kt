@@ -50,6 +50,13 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.liveSongCover
 import app.winters.octo.desktop.motion.MotionCoverArt
+import app.winters.octo.desktop.motion.TallLoopPicture
+import app.winters.octo.desktop.motion.rememberTallLoop
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalDensity
+import org.jetbrains.skia.Image
 import app.winters.octo.desktop.motion.motionArtist
 import app.winters.octo.desktop.library.lengthText
 import app.winters.octo.desktop.lyrics.LyricsMenuButton
@@ -158,30 +165,37 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
             dolly = { dolly.value },
         )
         val live = state.live
-        BoxWithConstraints(Modifier.fillMaxSize().padding(start = 56.dp, end = 40.dp, top = top + 48.dp, bottom = 32.dp)) {
-            // A station has no lyrics or song details: their place shows the
-            // stations being surfed (none for a station alone), so the cover
-            // stays where it was.
-            val panel = when {
-                live == null -> app.playerPanel
-                app.playerPanel == null || state.queue.size <= 1 -> null
-                else -> SidePanel.Queue
+        // A station has no lyrics or song details: their place shows the
+        // stations being surfed (none for a station alone), so the cover
+        // stays where it was.
+        val panel = when {
+            live == null -> app.playerPanel
+            app.playerPanel == null || state.queue.size <= 1 -> null
+            else -> SidePanel.Queue
+        }
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            // A song whose album has a tall animated cover shows it the
+            // window's full height, its words over the foot of it; any other
+            // keeps its cover in the column.
+            val tallWidth = minOf(maxHeight * 0.75f, maxWidth * (if (panel != null) 0.5f else 0.62f)).coerceAtLeast(TallLeast)
+            // Read only where it is drawn: a new picture of the loop redraws
+            // the picture, not the player.
+            val tall = if (live == null) {
+                rememberTallLoop(song.albumId, song.motionArtist(), song.album, with(LocalDensity.current) { tallWidth.roundToPx() })
+            } else {
+                null
             }
-            val artSide = minOf(440.dp, maxHeight - 290.dp, if (panel != null) maxWidth * 0.36f else maxWidth * 0.6f).coerceAtLeast(120.dp)
-            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally)) {
-                PlayerColumn(app, song, state, ink, artSide)
-                if (panel != null) {
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                        when (panel) {
-                            SidePanel.Lyrics -> LyricsView(app, Modifier.fillMaxSize(), textColor = ink)
-                            SidePanel.Queue -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
-                                QueueList(app)
-                            }
-                            SidePanel.Info -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
-                                InfoPanel(app, Modifier.fillMaxSize())
-                            }
-                            SidePanel.Downloads -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
-                                DownloadsPanel(app, Modifier.fillMaxSize())
+            val hasTall by remember(tall) { derivedStateOf { tall?.value != null } }
+            Crossfade(hasTall, animationSpec = tween(motionScale().ms(CoverFadeMs.toInt())), label = "tall cover") { showTall ->
+                if (showTall) {
+                    TallLayout(app, song, state, { tall?.value }, panel, ink, tallWidth, top)
+                } else {
+                    BoxWithConstraints(Modifier.fillMaxSize().padding(start = 56.dp, end = 40.dp, top = top + 48.dp, bottom = 32.dp)) {
+                        val artSide = minOf(440.dp, maxHeight - 290.dp, if (panel != null) maxWidth * 0.36f else maxWidth * 0.6f).coerceAtLeast(120.dp)
+                        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(48.dp, Alignment.CenterHorizontally)) {
+                            PlayerColumn(app, song, state, ink, artSide)
+                            if (panel != null) {
+                                PlayerPanel(app, panel, ink, Modifier.weight(1f).fillMaxHeight())
                             }
                         }
                     }
@@ -200,6 +214,73 @@ fun FullPlayer(app: AppState, modifier: Modifier = Modifier, top: androidx.compo
                 IconAction(OctoIcons.Info, "Song details", { app.togglePlayerPanel(SidePanel.Info) }, size = 36.dp, iconSize = 20.dp, active = app.playerPanel == SidePanel.Info, tint = ink)
             }
             IconAction(OctoIcons.Collapse, "Close the player", { app.fullPlayer = false }, size = 36.dp, iconSize = 20.dp, tint = ink)
+        }
+    }
+}
+
+// A song with a tall animated cover: the loop the window's full height on
+// the left (in the middle with nothing beside it), the song's words and
+// transport in white over a shade at its foot, and the panel beside it on
+// the wash. `image` gives the loop's picture of the moment as it is
+// drawn, none while the layout fades out.
+@Composable
+private fun TallLayout(
+    app: AppState,
+    song: Song,
+    state: PlayerState,
+    image: () -> Image?,
+    panel: SidePanel?,
+    ink: Color,
+    width: androidx.compose.ui.unit.Dp,
+    top: androidx.compose.ui.unit.Dp,
+) {
+    Row(Modifier.fillMaxSize(), horizontalArrangement = if (panel == null) Arrangement.Center else Arrangement.Start) {
+        Box(Modifier.fillMaxHeight().width(width)) {
+            TallLoopPicture(image, Modifier.matchParentSize())
+            Box(Modifier.matchParentSize().background(TallShade))
+            Column(
+                Modifier.align(Alignment.BottomCenter).widthIn(max = TallLinesWidth).fillMaxWidth().padding(horizontal = 40.dp, vertical = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                SongPlayerLines(app, song, state, Color.White, Color.White.copy(alpha = 0.85f))
+            }
+        }
+        if (panel != null) {
+            PlayerPanel(app, panel, ink, Modifier.weight(1f).fillMaxHeight().padding(start = 48.dp, end = 40.dp, top = top + 48.dp, bottom = 32.dp))
+        }
+    }
+}
+
+// The tall layout's least width (the transport and room either side), and
+// the widest its words run.
+private val TallLeast = 420.dp
+private val TallLinesWidth = 460.dp
+
+// Clear over the picture, darkening down to the words so white reads on
+// any loop.
+private val TallShade = Brush.verticalGradient(
+    0f to Color.Transparent,
+    0.4f to Color.Transparent,
+    0.65f to Color.Black.copy(alpha = 0.5f),
+    1f to Color.Black.copy(alpha = 0.85f),
+)
+
+// What the player shows beside the cover: the lyrics, the queue (or a
+// station's list), the song's details or the downloads.
+@Composable
+private fun PlayerPanel(app: AppState, panel: SidePanel, ink: Color, modifier: Modifier) {
+    Box(modifier) {
+        when (panel) {
+            SidePanel.Lyrics -> LyricsView(app, Modifier.fillMaxSize(), textColor = ink)
+            SidePanel.Queue -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
+                QueueList(app)
+            }
+            SidePanel.Info -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
+                InfoPanel(app, Modifier.fillMaxSize())
+            }
+            SidePanel.Downloads -> Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(20.dp)).padding(top = 8.dp)) {
+                DownloadsPanel(app, Modifier.fillMaxSize())
+            }
         }
     }
 }
@@ -248,89 +329,96 @@ private fun PlayerColumn(app: AppState, song: Song, state: PlayerState, ink: Col
             )
         }
         Spacer(Modifier.height(28.dp))
-        if (live != null) return@Column LivePlayerLines(app, song, state, live, ink, muted)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                MarkedTitle(song, OctoType.headline, markColor = muted) { Txt(song.title, OctoType.headline, ink, it, maxLines = 2) }
-                val artist = song.displayArtist ?: song.artist.orEmpty()
-                Txt(
-                    artist,
-                    OctoType.body,
-                    muted,
-                    Modifier.heightIn(min = Focus.MinTarget).clickable(enabled = song.artistId != null, role = Role.Button) {
-                        song.artistId?.let { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
-                        app.fullPlayer = false
-                    },
-                )
-            }
-            if (isOutside(app, song)) {
-                FetchButton(app, song, 40.dp, 22.dp, tint = ink)
-            } else {
-                val starred = app.isStarred(song)
-                IconAction(
-                    if (starred) OctoIcons.Liked else OctoIcons.Like,
-                    if (starred) "Remove from favorites" else "Add to favorites",
-                    { app.setStarred(listOf(song), !starred) },
-                    size = 40.dp,
-                    iconSize = 22.dp,
-                    tint = ink,
-                )
-            }
-        }
-        Spacer(Modifier.height(14.dp))
-        val position = rememberFramePosition(app.player)
-        val duration = state.durationMs
-        Column(Modifier.fillMaxWidth().heightIn(min = SeekArea)) {
-            LineSlider(
-                fraction = { if (duration > 0) position.value.toFloat() / duration else 0f },
-                onSeek = { app.player.seekTo((it * duration).toLong()) },
-                modifier = Modifier.fillMaxWidth(),
-                color = ink,
-                trackColor = ink.copy(alpha = 0.22f),
-                hoverLabel = { lengthText(((it * duration) / 1000).toInt()).ifEmpty { "0:00" } },
-                label = "Song position",
-                keyStep = if (duration > 0) (SEEK_STEP_MS.toFloat() / duration).coerceAtMost(1f) else 0.05f,
-                reading = { "${lengthText((it * duration / 1000).toInt()).ifEmpty { "0:00" }} of ${lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }}" },
-            )
-            PlayTimes(position, duration, muted)
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 40.dp, iconSize = 22.dp, active = state.shuffle, tint = ink, toggled = state.shuffle)
-            IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = 48.dp, iconSize = 30.dp, tint = ink)
-            PlayButton(state.playing, enabled = true, size = 68.dp) { app.player.togglePlay() }
-            IconAction(OctoIcons.Next, "Next", app.player::next, size = 48.dp, iconSize = 30.dp, tint = ink)
-            val repeat = state.repeat
-            IconAction(
-                if (repeat == RepeatMode.One) OctoIcons.RepeatOne else OctoIcons.Repeat,
-                when (repeat) {
-                    RepeatMode.Off -> "Repeat"
-                    RepeatMode.All -> "Repeat all"
-                    RepeatMode.One -> "Repeat one"
+        if (live != null) LivePlayerLines(app, song, state, live, ink, muted) else SongPlayerLines(app, song, state, ink, muted)
+    }
+}
+
+// A song's lines under its cover: the title, artist and heart, the seek
+// line, the transport and the volume.
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun SongPlayerLines(app: AppState, song: Song, state: PlayerState, ink: Color, muted: Color) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            MarkedTitle(song, OctoType.headline, markColor = muted) { Txt(song.title, OctoType.headline, ink, it, maxLines = 2) }
+            val artist = song.displayArtist ?: song.artist.orEmpty()
+            Txt(
+                artist,
+                OctoType.body,
+                muted,
+                Modifier.heightIn(min = Focus.MinTarget).clickable(enabled = song.artistId != null, role = Role.Button) {
+                    song.artistId?.let { app.navigator.go(Page.Artist(it, song.artist.orEmpty())) }
+                    app.fullPlayer = false
                 },
-                { app.player.setRepeat(RepeatMode.entries[(repeat.ordinal + 1) % RepeatMode.entries.size]) },
+            )
+        }
+        if (isOutside(app, song)) {
+            FetchButton(app, song, 40.dp, 22.dp, tint = ink)
+        } else {
+            val starred = app.isStarred(song)
+            IconAction(
+                if (starred) OctoIcons.Liked else OctoIcons.Like,
+                if (starred) "Remove from favorites" else "Add to favorites",
+                { app.setStarred(listOf(song), !starred) },
                 size = 40.dp,
                 iconSize = 22.dp,
-                active = repeat != RepeatMode.Off,
                 tint = ink,
-                toggled = repeat != RepeatMode.Off,
             )
         }
-        Spacer(Modifier.height(10.dp))
-        // The volume: quiet on the left, loud on the right; the wheel moves it.
-        val volume = state.volume
-        Row(
-            Modifier.fillMaxWidth().onPointerEvent(PointerEventType.Scroll) { event ->
-                val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
-                if (dy != 0f) app.setVolume(volume - dy * 0.05f)
+    }
+    Spacer(Modifier.height(14.dp))
+    val position = rememberFramePosition(app.player)
+    val duration = state.durationMs
+    Column(Modifier.fillMaxWidth().heightIn(min = SeekArea)) {
+        LineSlider(
+            fraction = { if (duration > 0) position.value.toFloat() / duration else 0f },
+            onSeek = { app.player.seekTo((it * duration).toLong()) },
+            modifier = Modifier.fillMaxWidth(),
+            color = ink,
+            trackColor = ink.copy(alpha = 0.22f),
+            hoverLabel = { lengthText(((it * duration) / 1000).toInt()).ifEmpty { "0:00" } },
+            label = "Song position",
+            keyStep = if (duration > 0) (SEEK_STEP_MS.toFloat() / duration).coerceAtMost(1f) else 0.05f,
+            reading = { "${lengthText((it * duration / 1000).toInt()).ifEmpty { "0:00" }} of ${lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }}" },
+        )
+        PlayTimes(position, duration, muted)
+    }
+    Spacer(Modifier.height(10.dp))
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        IconAction(OctoIcons.Shuffle, "Shuffle", { app.player.setShuffle(!state.shuffle) }, size = 40.dp, iconSize = 22.dp, active = state.shuffle, tint = ink, toggled = state.shuffle)
+        IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = 48.dp, iconSize = 30.dp, tint = ink)
+        PlayButton(state.playing, enabled = true, size = 68.dp) { app.player.togglePlay() }
+        IconAction(OctoIcons.Next, "Next", app.player::next, size = 48.dp, iconSize = 30.dp, tint = ink)
+        val repeat = state.repeat
+        IconAction(
+            if (repeat == RepeatMode.One) OctoIcons.RepeatOne else OctoIcons.Repeat,
+            when (repeat) {
+                RepeatMode.Off -> "Repeat"
+                RepeatMode.All -> "Repeat all"
+                RepeatMode.One -> "Repeat one"
             },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            IconAction(OctoIcons.VolumeDown, "Quieter", { app.setVolume(volume - 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
-            LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f), label = "Volume")
-            IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
-        }
+            { app.player.setRepeat(RepeatMode.entries[(repeat.ordinal + 1) % RepeatMode.entries.size]) },
+            size = 40.dp,
+            iconSize = 22.dp,
+            active = repeat != RepeatMode.Off,
+            tint = ink,
+            toggled = repeat != RepeatMode.Off,
+        )
+    }
+    Spacer(Modifier.height(10.dp))
+    // The volume: quiet on the left, loud on the right; the wheel moves it.
+    val volume = state.volume
+    Row(
+        Modifier.fillMaxWidth().onPointerEvent(PointerEventType.Scroll) { event ->
+            val dy = event.changes.firstOrNull()?.scrollDelta?.y ?: 0f
+            if (dy != 0f) app.setVolume(volume - dy * 0.05f)
+        },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        IconAction(OctoIcons.VolumeDown, "Quieter", { app.setVolume(volume - 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
+        LineSlider(fraction = { volume }, onSeek = app::setVolume, modifier = Modifier.weight(1f), live = true, color = ink, trackColor = ink.copy(alpha = 0.22f), label = "Volume")
+        IconAction(OctoIcons.VolumeUp, "Louder", { app.setVolume(volume + 0.1f) }, size = 30.dp, iconSize = 18.dp, tint = muted)
     }
 }
 
