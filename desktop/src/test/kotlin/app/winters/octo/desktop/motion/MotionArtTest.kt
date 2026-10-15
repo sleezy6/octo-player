@@ -3,7 +3,12 @@ package app.winters.octo.desktop.motion
 import app.winters.octo.desktop.FakeServer
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.settings.MotionCoverPrefs
+import app.winters.octo.desktop.settings.SavedServer
+import app.winters.octo.subsonic.Credentials
 import app.winters.octo.subsonic.OCTO_ANIMATED_ARTWORK
+import app.winters.octo.subsonic.SubsonicClient
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import java.io.File
 import kotlinx.coroutines.runBlocking
 import mockwebserver3.MockResponse
 import mockwebserver3.RecordedRequest
@@ -20,9 +25,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 // Finding and keeping animated covers, against a pretend Octo server that
-// offers them (octoAnimatedArtwork) and also plays Apple's part: the
-// playlists and the loop's file, served in byte ranges as Apple serves
-// them. Never the real ones.
+// offers them (octoAnimatedArtwork) and relays them, as Octo does, under
+// animated-artwork/<key>/: the playlists and the loop's file, served in
+// byte ranges as Apple serves them. Never the real ones.
 class MotionArtTest {
     @get:Rule val folder = TemporaryFolder()
     private val server = FakeServer()
@@ -32,19 +37,23 @@ class MotionArtTest {
     // The loop's file: a setup part then two segments, as one file.
     private val loop = Random(7).nextBytes(10_000)
 
-    // What getAnimatedArtwork answers: the loop, none, or a failure.
-    private enum class Answer { Loop, None, NotFound, Unavailable }
+    // What getAnimatedArtwork answers: the loop as a path on the server
+    // (Octo relaying it), the loop at a full address (an older Octo), none,
+    // or a failure.
+    private enum class Answer { Loop, FullAddress, None, NotFound, Unavailable }
     private var answer = Answer.Loop
 
     init {
         server.answerBy("getAnimatedArtwork") {
             when (answer) {
-                Answer.Loop -> server.ok(""""animatedArtwork":{"url":"${server.address}assets/P1_default.m3u8","urlTall":"${server.address}assets/P1_tall.m3u8"}""")
+                Answer.Loop -> server.ok(""""animatedArtwork":{"url":"animated-artwork/k3y/square.m3u8","urlTall":"animated-artwork/k3y/tall.m3u8"}""")
+                Answer.FullAddress -> server.ok(""""animatedArtwork":{"url":"${server.address}assets/P1_default.m3u8"}""")
                 Answer.None -> server.ok()
                 Answer.NotFound -> failed(70, "Album not found")
                 Answer.Unavailable -> failed(0, "The animated artwork server did not answer; try again later")
             }
         }
+        server.respondBy("square.m3u8") { text(MASTER) }
         server.respondBy("P1_default.m3u8") { text(MASTER) }
         server.respondBy("P1_486.m3u8") { text(media("P1_486-.mp4")) }
         server.respondBy("P1_1080.m3u8") { text(media("P1_1080-.mp4")) }
@@ -84,7 +93,7 @@ class MotionArtTest {
     private val offering = server.connection(listOf("$OCTO_ANIMATED_ARTWORK:1"))
     private var connection: Connection? = offering
 
-    private fun art(withFolder: Boolean = true) = MotionArt(OkHttpClient(), { prefs }, { connection }, { clock }).also {
+    private fun art(withFolder: Boolean = true) = MotionArt({ prefs }, { connection }, { clock }).also {
         if (withFolder) it.folder = folder.root
     }
 
@@ -214,6 +223,62 @@ class MotionArtTest {
         art.learn(connection)
         assertTrue(!art.offered())
         assertNull(art.loopFor("al-1", "Linkin Park", "Living Things", 400))
+    }
+
+    // Octo relays the loop: everything is asked of it, under the cover's key.
+    @Test
+    fun theLoopComesFromTheServersRelay(): Unit = runBlocking {
+        assertNotNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
+        val paths = server.calls.map { it.url.encodedPath }.filterNot { it.endsWith("/getAnimatedArtwork") }
+        assertEquals(listOf("/animated-artwork/k3y/square.m3u8", "/animated-artwork/k3y/small/P1_486.m3u8", "/animated-artwork/k3y/small/P1_486-.mp4"), paths)
+    }
+
+    // A server reached under a path keeps it for the relay, as for rest/.
+    @Test
+    fun aServerUnderAPathKeepsItForTheRelay(): Unit = runBlocking {
+        for (base in listOf("${server.address}octo/", "${server.address}octo")) {
+            server.calls.clear()
+            val client = SubsonicClient(base.toHttpUrl(), Credentials("winters", "secret"), OkHttpClient())
+            connection = Connection(client, SavedServer(base, "winters", extensions = listOf("$OCTO_ANIMATED_ARTWORK:1")))
+            File(folder.root, "lookups.json").delete()
+            folder.root.listFiles()!!.forEach { it.delete() }
+            assertNotNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400), base)
+            assertTrue(server.calls.first { it.url.encodedPath.endsWith("square.m3u8") }.url.encodedPath.startsWith("/octo/animated-artwork/k3y/"), base)
+        }
+    }
+
+    // The server's own headers (a proxy's access token) go with the relay's files too.
+    @Test
+    fun theServersHeadersGoWithTheRelay(): Unit = runBlocking {
+        val client = SubsonicClient(server.address.toHttpUrl(), Credentials("winters", "secret"), OkHttpClient(), headers = mapOf("X-Access" to "t0ken"))
+        connection = Connection(client, SavedServer(server.address, "winters", extensions = listOf("$OCTO_ANIMATED_ARTWORK:1")), mapOf("X-Access" to "t0ken"))
+        assertNotNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
+        val relayed = server.calls.filter { "/animated-artwork/" in it.url.encodedPath }
+        assertEquals(3, relayed.size)
+        assertTrue(relayed.all { it.headers["X-Access"] == "t0ken" })
+    }
+
+    // An older Octo hands out the playlist's full address; that still plays.
+    @Test
+    fun aFullAddressFromAnOlderOctoStillPlays(): Unit = runBlocking {
+        answer = Answer.FullAddress
+        val file = assertNotNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
+        assertContentEquals(loop, file.readBytes())
+    }
+
+    // At home and away the server has two addresses; a loop is one file.
+    @Test
+    fun aLoopIsKeptOnceWhicheverAddressReachesTheServer(): Unit = runBlocking {
+        val away = server.address.toHttpUrl()
+        val home = away.newBuilder().host(if (away.host == "127.0.0.1") "localhost" else "127.0.0.1").build()
+        var route = away
+        val client = SubsonicClient(away, Credentials("winters", "secret"), OkHttpClient(), route = { route })
+        connection = Connection(client, SavedServer(away.toString(), "winters", extensions = listOf("$OCTO_ANIMATED_ARTWORK:1")))
+        val first = assertNotNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
+        route = home
+        val second = assertNotNull(art().loopFor("al-1", "Linkin Park", "Living Things", 400))
+        assertEquals(first, second)
+        assertEquals(1, downloads().size)
     }
 
     @Test

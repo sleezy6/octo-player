@@ -51,7 +51,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
-import okhttp3.OkHttpClient
 import org.jetbrains.skia.ColorAlphaType
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.FilterMipmap
@@ -67,12 +66,11 @@ import java.util.concurrent.ConcurrentHashMap
 // and the loops playing now, each decoded once however many places show
 // it (the full player and the mini player at once, say).
 class MotionCovers(
-    http: OkHttpClient,
     val prefs: StateFlow<MotionCoverPrefs>,
     private val scope: CoroutineScope,
     connection: () -> Connection? = { null },
 ) {
-    val art = MotionArt(http, { prefs.value }, connection)
+    val art = MotionArt({ prefs.value }, connection)
 
     init {
         // Each server signed in to is asked once whether it offers them.

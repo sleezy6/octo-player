@@ -65,6 +65,17 @@ class SubsonicClient(
 
     // For the one call that can take minutes: Octo builds the stations the
     // first time they are asked for after it starts.
+    // How this server is reached for files it serves outside rest/ (an
+    // animated cover Octo relays): its headers added, to it alone.
+    val serverHttp: OkHttpClient get() = http
+
+    // A path the server gave relative to its own address (as rest/ is),
+    // made whole against the address in use, even one with a path.
+    fun resolve(path: String): HttpUrl? {
+        val base = baseUrl.let { if (it.encodedPath.endsWith("/")) it else it.newBuilder().addPathSegment("").build() }
+        return base.resolve(path)
+    }
+
     private val patient: OkHttpClient by lazy { this.http.newBuilder().readTimeout(3, TimeUnit.MINUTES).build() }
 
     // A signed address for an endpoint. Every call gets a fresh salt, so

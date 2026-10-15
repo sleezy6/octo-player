@@ -256,7 +256,6 @@ class AppState(
     // Animated covers, where an album has one and the setting is on; Main
     // gives them a folder in the cache.
     val motionCovers = MotionCovers(
-        http,
         settings.state.map { it.appearance.motionCovers }.stateIn(scope, SharingStarted.Eagerly, settings.current.appearance.motionCovers),
         scope,
         connection = { connection },

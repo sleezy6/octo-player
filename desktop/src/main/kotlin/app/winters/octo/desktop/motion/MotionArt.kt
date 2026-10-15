@@ -16,7 +16,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -26,15 +25,17 @@ import java.util.concurrent.ConcurrentHashMap
 
 // Finds an album's animated cover and keeps it on this computer. The
 // signed-in Octo server is asked for the album (octoAnimatedArtwork, by its
-// id, or its artist and name); it answers with Apple Music's HLS playlist
-// for the loop, or that there is none. The H.264 copy nearest the size it
-// is shown at is saved whole, a few megabytes, and played from the file
-// from then on: no stream stays open while it loops.
+// id, or its artist and name); it answers with the HLS playlist of the
+// loop, which it relays from Apple Music (a path on itself, such as
+// animated-artwork/<key>/square.m3u8), or that there is none. The H.264
+// copy nearest the size it is shown at is saved whole, a few megabytes,
+// and played from the file from then on: no stream stays open while it
+// loops.
 //
-// The loop itself comes from Apple's servers. Nothing is asked while the
-// setting is off or the server does not offer animated covers.
+// Everything is fetched from the Octo server, with its headers, never
+// from Apple. Nothing is asked while the setting is off or the server does
+// not offer animated covers.
 class MotionArt(
-    private val http: OkHttpClient,
     private val prefs: () -> MotionCoverPrefs,
     private val connection: () -> Connection?,
     private val now: () -> Long = System::currentTimeMillis,
@@ -114,17 +115,28 @@ class MotionArt(
     private suspend fun load(folder: File, connection: Connection, key: String, albumId: String?, artist: String, album: String, px: Int): File? {
         folder.mkdirs()
         val found = lookup(folder, key) ?: search(connection, albumId, artist, album).also { remember(folder, key, it) }
-        val master = found.master?.toHttpUrlOrNull() ?: return null
-        val variants = hlsVariants(masterPlaylist(folder, master), master)
+        // A path on the server, made whole against the address in use (an
+        // address in full, from an older Octo, stays as it is).
+        val master = found.master?.let(connection.client::resolve) ?: return null
+        val http = connection.client.serverHttp
+        val variants = hlsVariants(masterPlaylist(http, folder, master, connection), master)
         val variant = pickVariant(variants, px) ?: return null
-        val file = File(folder, "${hash(variant.url.toString())}.mp4")
+        val file = File(folder, "${hash(onServer(variant.url, connection))}.mp4")
         if (file.isFile && file.length() > 0) {
             file.setLastModified(now())
             return file
         }
-        save(variant, file)
+        save(http, variant, file)
         prune(folder, keep = file)
         return file
+    }
+
+    // An address without the server's own, so a loop is the same file
+    // whichever address the server is reached by (at home or away).
+    private fun onServer(url: HttpUrl, connection: Connection): String {
+        val base = connection.client.resolve("")?.toString().orEmpty()
+        val text = url.toString()
+        return if (base.isNotEmpty() && text.startsWith(base)) text.removePrefix(base) else text
     }
 
     // What the server says about the album: its playlist, or none. Throws
@@ -138,17 +150,17 @@ class MotionArt(
 
     // The master playlist, kept beside the loops so a loop already saved
     // plays without asking anyone.
-    private fun masterPlaylist(folder: File, master: HttpUrl): String {
-        val kept = File(folder, "${hash(master.toString())}.m3u8")
+    private fun masterPlaylist(http: OkHttpClient, folder: File, master: HttpUrl, connection: Connection): String {
+        val kept = File(folder, "${hash(onServer(master, connection))}.m3u8")
         if (kept.isFile) return kept.readText()
-        val text = fetchText(master)
+        val text = fetchText(http, master)
         writeAtomically(kept) { it.writeText(text) }
         return text
     }
 
     // Saves a copy's pieces, joined, as one file.
-    private fun save(variant: HlsVariant, file: File) {
-        val pieces = joinedPieces(hlsPieces(fetchText(variant.url), variant.url))
+    private fun save(http: OkHttpClient, variant: HlsVariant, file: File) {
+        val pieces = joinedPieces(hlsPieces(fetchText(http, variant.url), variant.url))
         if (pieces.isEmpty()) throw IOException("no pieces in ${variant.url}")
         writeAtomically(file) { out ->
             out.outputStream().use { stream ->
@@ -180,7 +192,7 @@ class MotionArt(
         }
     }
 
-    private fun fetchText(url: HttpUrl): String =
+    private fun fetchText(http: OkHttpClient, url: HttpUrl): String =
         http.newCall(Request.Builder().url(url).build()).execute().use { response ->
             if (!response.isSuccessful) throw IOException("$url answered ${response.code}")
             response.body.string()

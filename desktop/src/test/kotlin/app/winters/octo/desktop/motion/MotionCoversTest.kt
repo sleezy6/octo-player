@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import okhttp3.OkHttpClient
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.Image
 import org.junit.After
@@ -30,7 +29,7 @@ import kotlin.test.assertTrue
 class MotionCoversTest {
     @get:Rule val folder = TemporaryFolder()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val covers = MotionCovers(OkHttpClient(), MutableStateFlow(MotionCoverPrefs()), scope)
+    private val covers = MotionCovers(MutableStateFlow(MotionCoverPrefs()), scope)
 
     @After
     fun close() = scope.cancel()
