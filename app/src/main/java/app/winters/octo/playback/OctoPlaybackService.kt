@@ -31,6 +31,7 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.discovery.Downloads
 import app.winters.octo.discovery.FindLengths
 import app.winters.octo.discovery.asTrack
+import app.winters.octo.liveradio.LiveLookup
 import app.winters.octo.offline.Prefetcher
 import app.winters.octo.output.Casting
 import app.winters.octo.output.DeviceMedia
@@ -117,6 +118,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var coversAhead: CoversAhead
     @Inject lateinit var editor: QueueEditor
     @Inject lateinit var autoplay: Autoplay
+    @Inject lateinit var stationRefill: StationRefill
     @Inject lateinit var downloads: Downloads
     @Inject lateinit var online: OnlineDao
     @Inject lateinit var lengths: FindLengths
@@ -126,6 +128,7 @@ class OctoPlaybackService : MediaLibraryService() {
     @Inject lateinit var feedback: Feedback
     @Inject lateinit var switcher: ServerSwitch
     @Inject lateinit var sessions: SessionRepository
+    @Inject lateinit var liveLookup: LiveLookup
 
     private val scope = MainScope()
     // While the server in use changes, the emptied player is not saved over
@@ -167,7 +170,7 @@ class OctoPlaybackService : MediaLibraryService() {
         // Each deck's buffering, told how long a stream waits before it starts.
         val loads = ArrayList<OctoLoadControl>()
         fun deck(): ExoPlayer {
-            val renderers = OctoRenderersFactory(this, { sound.current.value }, albums, crossfadeOn::get)
+            val renderers = OctoRenderersFactory(this, { sound.playing.value }, albums, crossfadeOn::get)
             val control = OctoLoadControl().also(loads::add)
             return buildDeck(this, streams.mediaSourceFactory(), renderers, audioSession.id, control)
                 .also { deck -> renderers.sound?.let { sounds[deck] = it } }
@@ -179,12 +182,14 @@ class OctoPlaybackService : MediaLibraryService() {
         tracker = PlayTracker(plays::started, plays::record, isPlaying = { player.isPlaying })
         player.addListener(tracker)
         player.addListener(Watcher())
+        player.addListener(RadioWatch(player, scope, liveLookup::known) { liveLookup.look(it) })
         sleep.attach(player)
         // Saving songs ahead is for the phone's own playing.
         prefetch.attach(local)
         // The covers of the song on and the next ones, wherever it plays.
         coversAhead.attach(player)
         editor.attach(player)
+        stationRefill.attach(player, scope) { autoplay.check() }
         autoplay.attach(player, scope)
         // Casting to a TV or speaker swaps the session's player to one that
         // drives the device, and back.
@@ -284,6 +289,7 @@ class OctoPlaybackService : MediaLibraryService() {
         coversAhead.detach()
         editor.detach()
         autoplay.detach()
+        stationRefill.detach()
         outputs.detach(casting)
         casting.release()
         session?.release()
@@ -382,7 +388,8 @@ class OctoPlaybackService : MediaLibraryService() {
     // the saved song and place, or at the start when that song is gone.
     private suspend fun restoreQueue() {
         val saved = queue.load() ?: return
-        val each = playable.itemsEach(saved.trackIds)
+        // Each song back with where it came from, so a station keeps going.
+        val each = playable.itemsEach(saved.trackIds).mapIndexed { i, item -> item?.let { withSavedSource(it, saved.sources.getOrNull(i)) } }
         val items = each.filterNotNull()
         if (items.isEmpty() || player.mediaItemCount > 0) return
         val found = each.map { it != null }
@@ -392,7 +399,8 @@ class OctoPlaybackService : MediaLibraryService() {
         // The saved shuffle order, less any songs that are gone.
         restoredShuffle(saved.shuffleOrder, found)?.let(player::setPlayOrder)
         player.shuffleModeEnabled = saved.shuffle
-        player.prepare()
+        // A station waits unopened: Play joins it live.
+        if (items.getOrNull(index)?.mediaId?.let(::isRadio) != true) player.prepare()
         serverQueue.restored(snapshot())
     }
 
@@ -457,6 +465,7 @@ class OctoPlaybackService : MediaLibraryService() {
             positionMs = player.currentPosition,
             repeatMode = player.repeatMode,
             shuffle = player.shuffleModeEnabled,
+            sources = List(player.mediaItemCount) { player.getMediaItemAt(it).queueSource.encoded() },
         )
     }
 
@@ -464,18 +473,45 @@ class OctoPlaybackService : MediaLibraryService() {
         // Songs that failed one after another, back to 0 once one plays.
         private var failedInARow = 0
 
+        // The item that was on, and where, for a station that ends.
+        private var lastId: String? = null
+        private var lastIndex = C.INDEX_UNSET
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val endedStation = lastId?.takeIf(::isRadio)
+            val endedAt = lastIndex
+            lastId = mediaItem?.mediaId
+            lastIndex = player.currentMediaItemIndex
+            // A station's stream that ended for good stops on that station
+            // rather than moving on to the next one by itself.
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && endedStation != null && mediaItem != null && isRadio(mediaItem.mediaId) &&
+                endedAt in 0 until player.mediaItemCount
+            ) {
+                scope.launch {
+                    player.seekToDefaultPosition(endedAt)
+                    player.pause()
+                    val name = radioOf(endedStation)?.second?.takeIf(String::isNotBlank) ?: "The station"
+                    feedback.show("$name stopped: its stream ended")
+                }
+            }
             currentId.value = mediaItem?.mediaId
             saveQueue()
             widgets.show(player)
             serverQueue.changed(snapshot())
+            stationRefill.check()
             autoplay.check()
             learnLength()
         }
 
-        override fun onRepeatModeChanged(repeatMode: Int) = autoplay.check()
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            stationRefill.check()
+            autoplay.check()
+        }
 
-        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = autoplay.check()
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            stationRefill.check()
+            autoplay.check()
+        }
 
         // While music plays, a song that cannot, like a stream with no
         // connection or a file that is gone, is skipped instead of stopping
@@ -486,7 +522,9 @@ class OctoPlaybackService : MediaLibraryService() {
             failedInARow++
             val title = player.currentMediaItem?.mediaMetadata?.title?.toString()?.takeIf(String::isNotBlank) ?: "a song"
             val why = playFailureOf(error, isFind(player.currentMediaItem?.mediaId.orEmpty())).words
-            if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem()) {
+            // A station that cannot play stops there: the next station is
+            // the listener's to choose.
+            if (failedInARow >= player.mediaItemCount || !player.hasNextMediaItem() || isRadio(player.currentMediaItem?.mediaId.orEmpty())) {
                 feedback.show(stoppedLine(title, why))
                 return
             }
@@ -509,12 +547,14 @@ class OctoPlaybackService : MediaLibraryService() {
                 closed = false
                 setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_AFTER_STOP_OR_ERROR)
             }
+            stationRefill.check()
             autoplay.check()
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
             queueChanged.tryEmit(Unit)
             serverQueue.changed(snapshot())
+            stationRefill.check()
             autoplay.check()
             // The length is known once the song has opened.
             learnLength()
@@ -528,6 +568,7 @@ class OctoPlaybackService : MediaLibraryService() {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             positionSaver?.cancel()
             widgets.show(player)
+            stationRefill.check()
             autoplay.check()
             if (isPlaying) {
                 // Equalizer apps on the phone can attach to the music now,

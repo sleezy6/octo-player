@@ -11,6 +11,7 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.animateContentSize
@@ -51,11 +52,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -75,11 +78,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
@@ -94,6 +100,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -139,6 +146,7 @@ import app.winters.octo.ui.common.SwipeSkip
 import app.winters.octo.ui.common.detectAxisDrags
 import app.winters.octo.ui.common.swipeSkip
 import app.winters.octo.ui.common.AddToLibraryButton
+import app.winters.octo.ui.common.LocalChoiceSheet
 import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.LocalPressSpot
 import app.winters.octo.ui.common.pressSpot
@@ -327,7 +335,9 @@ private fun AnimatedVisibilityScope.PlayerContent(
     onOpenSpeed: () -> Unit,
     onChooseLyrics: () -> Unit,
 ) {
-    val lyricsOpen by model.lyricsOpen.collectAsStateWithLifecycle()
+    val lyricsWanted by model.lyricsOpen.collectAsStateWithLifecycle()
+    // A live station has no lyrics to show.
+    val lyricsOpen = lyricsWanted && now.live == null
     val prefs by model.prefs.collectAsStateWithLifecycle()
     val calm = prefs.reduceMotion || rememberSystemReduceMotion()
     // The player's own scope, so the controls still rise in as the player
@@ -391,26 +401,27 @@ private fun AnimatedVisibilityScope.PlayerContent(
             // the volume and the switches fold away, and the lyrics fill
             // everything from under the top line to just above the small
             // player that takes the controls' place.
+            // The artwork and the blocks keep their places either way, so
+            // closing lyrics mode brings them back where they were.
             Box(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
-                Column(Modifier.fillMaxSize()) {
-                    header()
-                    ArtStage(now, model, folded = lyricsOpen, calm = calm, maxSide = 312.dp, modifier = Modifier.weight(1f).fillMaxWidth(), artModifier = artModifier)
-                    AnimatedContent(
-                        targetState = lyricsOpen,
-                        transitionSpec = { lyricsFold(calm, resize = true) },
-                        contentAlignment = Alignment.BottomCenter,
-                        label = "player controls",
-                    ) { open ->
-                        if (open) {
-                            Box(Modifier.fillMaxWidth().padding(bottom = LyricsBarGap)) { lyricsBar() }
-                        } else {
-                            Column {
-                                controls(true)
-                                Spacer(Modifier.height(16.dp))
-                            }
-                        }
-                    }
+                val shown by animateFloatAsState(
+                    if (lyricsOpen) 0f else 1f,
+                    if (calm) snap() else tween(if (lyricsOpen) 160 else 240, delayMillis = if (lyricsOpen) 0 else 120),
+                    label = "controls shown",
+                )
+                with(player) {
+                    UprightPlayer(
+                        now, model, calm, folded = lyricsOpen, shown = { shown },
+                        header = header, artModifier = artModifier,
+                        onClose = onClose, onOpenArtist = onOpenArtist, onOpenQueue = onOpenQueue, onOpenSleep = onOpenSleep, onOpenSpeed = onOpenSpeed,
+                    )
                 }
+                AnimatedVisibility(
+                    visible = lyricsOpen,
+                    enter = if (calm) EnterTransition.None else fadeIn(tween(240, delayMillis = 120)),
+                    exit = if (calm) ExitTransition.None else fadeOut(tween(160)),
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = LyricsBarGap),
+                ) { lyricsBar() }
                 // Laid out at their full size from the start, so the lines
                 // settle where they belong while the rest folds away.
                 LyricsLayer(
@@ -530,6 +541,7 @@ private fun AnimatedVisibilityScope.ArtStage(
     val haptics = LocalHapticFeedback.current
     // How far the artwork has been swiped, in pixels.
     var swipe by remember { mutableFloatStateOf(0f) }
+    val liveLineupNow by rememberUpdatedState(now.live?.lineup)
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
         val side = min(maxSide, min(maxWidth, maxHeight))
         val width = constraints.maxWidth.toFloat()
@@ -555,7 +567,17 @@ private fun AnimatedVisibilityScope.ArtStage(
                                 }
                             },
                             onEnd = { offset, velocity ->
-                                val skip = swipeSkip(offset, velocity, distance, fling)
+                                // A station at an end of its lineup has no
+                                // station that way to swipe to.
+                                val lineup = liveLineupNow
+                                val skip = swipeSkip(offset, velocity, distance, fling).let {
+                                    when {
+                                        lineup == null -> it
+                                        it == SwipeSkip.Next && !lineup.hasNext -> SwipeSkip.Stay
+                                        it == SwipeSkip.Previous && !lineup.hasPrevious -> SwipeSkip.Stay
+                                        else -> it
+                                    }
+                                }
                                 if (skip != SwipeSkip.Stay && !armed) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                                 armed = false
                                 settling = scope.launch { settleSwipe(skip, width, { swipe }, { swipe = it }, model::next, model::previous) }
@@ -599,8 +621,9 @@ private suspend fun settleSwipe(
 }
 
 // Everything under the artwork: the song, the progress line, the controls,
-// the volume and the row of switches. They rise into place a moment after
-// the player opens. `roomy` is off only on a short sideways screen.
+// the volume and the row of switches, as the sideways player stacks them.
+// They rise into place a moment after the player opens. `roomy` is off
+// only on a short sideways screen.
 @Composable
 private fun AnimatedVisibilityScope.Controls(
     now: NowPlaying,
@@ -613,25 +636,11 @@ private fun AnimatedVisibilityScope.Controls(
     onOpenSpeed: () -> Unit,
     roomy: Boolean,
 ) {
-    val density = LocalDensity.current
     val gap = if (roomy) 12.dp else 4.dp
-    Column(
-        Modifier.animateEnterExit(
-            enter = slideInVertically(spring(0.68f, 400f, IntOffset.VisibilityThreshold)) {
-                with(density) { 28.dp.roundToPx() }
-            } + fadeIn(tween(380, delayMillis = 80)),
-            exit = ExitTransition.None,
-        ),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist, onClose) }
-            SongButtons(now, model)
-        }
-        // The song's rating, only once it has one.
-        val rating by model.rating.collectAsStateWithLifecycle()
-        RatingStars(rating, Modifier.padding(top = 2.dp), size = 12.dp)
-        Spacer(Modifier.height(12.dp))
-        Progress(now, model, onOpenSpeed)
+    Column(Modifier.then(risesIn())) {
+        TitleRow(now, model, onClose, onOpenArtist)
+        Spacer(Modifier.height(BarGap))
+        BarBlock(now, model, onOpenSpeed)
         Spacer(Modifier.height(gap))
         Transport(now, model)
         if (roomy) {
@@ -639,10 +648,178 @@ private fun AnimatedVisibilityScope.Controls(
             Volume(model)
         }
         Spacer(Modifier.height(gap))
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
-        ) {
+        SwitchRow(now, model, lyricsOpen, onOpenQueue, onOpenSleep)
+        Spacer(Modifier.height(gap))
+    }
+}
+
+// The upright player: the album line, the artwork a little under it, and
+// the song's blocks under that, the height shared between them by
+// playerRhythm. Each block rises into place as the player opens. In lyrics
+// mode (`folded`) the artwork folds away and the blocks fade to `shown`
+// and take no touches, staying laid out where they were.
+@Composable
+private fun AnimatedVisibilityScope.UprightPlayer(
+    now: NowPlaying,
+    model: PlayerViewModel,
+    calm: Boolean,
+    folded: Boolean,
+    shown: () -> Float,
+    header: @Composable () -> Unit,
+    artModifier: Modifier,
+    onClose: () -> Unit,
+    onOpenArtist: (String) -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenSleep: () -> Unit,
+    onOpenSpeed: () -> Unit,
+) {
+    val look = risesIn()
+        .graphicsLayer { alpha = shown() }
+        .then(if (folded) Modifier.clearAndSetSemantics { }.pointerInput(Unit) { swallowTouches() } else Modifier)
+    RhythmColumn(Modifier.fillMaxSize()) {
+        header()
+        ArtStage(now, model, folded = folded, calm = calm, maxSide = Dp.Infinity, modifier = Modifier, artModifier = artModifier)
+        Box(look) { TitleRow(now, model, onClose, onOpenArtist) }
+        Box(look) { BarBlock(now, model, onOpenSpeed) }
+        Box(look) { Transport(now, model) }
+        Box(look) { Volume(model) }
+        Box(look) { SwitchRow(now, model, false, onOpenQueue, onOpenSleep) }
+    }
+}
+
+// Takes every touch before what is under it can, for controls put away.
+private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.swallowTouches() {
+    awaitPointerEventScope {
+        while (true) awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial).changes.forEach { it.consume() }
+    }
+}
+
+// Lays out the upright player's seven parts (the album line, the artwork,
+// then the five blocks under it) by playerRhythm: each block at its own
+// height, the artwork square, and the gaps as the rhythm shares them. A
+// volume line the rhythm leaves out is not placed.
+@Composable
+private fun RhythmColumn(modifier: Modifier, content: @Composable () -> Unit) {
+    Layout(content, modifier) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val height = constraints.maxHeight
+        val loose = Constraints(minWidth = 0, maxWidth = width, minHeight = 0, maxHeight = Constraints.Infinity)
+        val header = measurables[0].measure(loose)
+        val blocks = measurables.drop(2).map { it.measure(loose) }
+        val rhythm = playerRhythm(
+            height = height.toDp().value,
+            width = width.toDp().value,
+            header = header.height.toDp().value,
+            blocks = blocks.map { it.height.toDp().value },
+            volumeAt = RHYTHM_VOLUME_AT,
+        )
+        val side = rhythm.art.dp.roundToPx()
+        val art = measurables[1].measure(Constraints.fixed(side, side))
+        val shown = blocks.filterIndexed { i, _ -> rhythm.volume || i != RHYTHM_VOLUME_AT }
+        layout(width, height) {
+            var y = 0
+            header.placeRelative((width - header.width) / 2, y)
+            y += header.height + rhythm.gaps[0].dp.roundToPx()
+            art.placeRelative((width - side) / 2, y)
+            y += side
+            shown.forEachIndexed { i, block ->
+                y += rhythm.gaps[i + 1].dp.roundToPx()
+                block.placeRelative((width - block.width) / 2, y)
+                y += block.height
+            }
+        }
+    }
+}
+
+// Where the volume line is among the blocks under the artwork.
+private const val RHYTHM_VOLUME_AT = 3
+
+// The room between the song's name and its bar, sideways.
+private val BarGap = 10.dp
+
+// The rise and fade the controls come in with as the player opens.
+@Composable
+private fun AnimatedVisibilityScope.risesIn(): Modifier {
+    val density = LocalDensity.current
+    return Modifier.animateEnterExit(
+        enter = slideInVertically(spring(0.68f, 400f, IntOffset.VisibilityThreshold)) {
+            with(density) { 28.dp.roundToPx() }
+        } + fadeIn(tween(380, delayMillis = 80)),
+        exit = ExitTransition.None,
+    )
+}
+
+// The song's name and artist with its buttons, and a line for its rating
+// kept the same height whether it has one or not (and for a station), so
+// the player's blocks keep their places from song to song.
+@Composable
+private fun TitleRow(now: NowPlaying, model: PlayerViewModel, onClose: () -> Unit, onOpenArtist: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        val live = now.live
+        val liveModel: LivePlayerViewModel? = if (live != null) hiltViewModel() else null
+        // A station's heart and menu sit on the title's own line, centered
+        // on it, their touch room reaching past it.
+        val measurer = rememberTextMeasurer()
+        val titleLine = with(LocalDensity.current) { remember(measurer, this) { measurer.measure("Ag", TitleStyle).size.height.toDp() } }
+        Row(verticalAlignment = if (live != null) Alignment.Top else Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { TitleBlock(now, onOpenArtist, onClose) }
+            if (live != null && liveModel != null) {
+                Row(Modifier.height(titleLine).wrapContentHeight(unbounded = true), verticalAlignment = Alignment.CenterVertically) {
+                    LiveSongButtons(live, liveModel, calm = model.prefs.collectAsStateWithLifecycle().value.reduceMotion || rememberSystemReduceMotion())
+                }
+            } else {
+                SongButtons(now, model)
+            }
+        }
+        Box(Modifier.padding(top = 2.dp).height(RatingLine)) {
+            if (live == null) {
+                // The song's rating, only once it has one.
+                val rating by model.rating.collectAsStateWithLifecycle()
+                RatingStars(rating, size = 12.dp)
+            }
+        }
+    }
+}
+
+private val RatingLine = 12.dp
+
+// The progress line with its times, or for a station the live bar, in the
+// same room.
+@Composable
+private fun BarBlock(now: NowPlaying, model: PlayerViewModel, onOpenSpeed: () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        val live = now.live
+        if (live == null) {
+            Progress(now, model, onOpenSpeed)
+        } else {
+            val prefs by model.prefs.collectAsStateWithLifecycle()
+            LiveBar(live, calm = prefs.reduceMotion || rememberSystemReduceMotion())
+        }
+    }
+}
+
+// The row of switches under the controls. A station has no lyrics,
+// shuffle or repeat: its queue button lists the stations being surfed, and
+// the sleep timer stays.
+@Composable
+private fun SwitchRow(now: NowPlaying, model: PlayerViewModel, lyricsOpen: Boolean, onOpenQueue: () -> Unit, onOpenSleep: () -> Unit) {
+    val live = now.live
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterHorizontally),
+    ) {
+        if (live != null) {
+            if (live.lineup.shows) {
+                val sheet = LocalChoiceSheet.current
+                ActionButton(
+                    icon = OctoIcons.Queue,
+                    description = "Stations",
+                    on = false,
+                    onClick = { sheet.show(stationList(live.lineup, model::playAt)) },
+                )
+            }
+            SleepCircle(model, onClick = onOpenSleep)
+        } else {
             ActionButton(
                 icon = OctoIcons.Lyrics,
                 description = "Lyrics",
@@ -675,7 +852,6 @@ private fun AnimatedVisibilityScope.Controls(
                 onClick = model::cycleRepeat,
             )
         }
-        Spacer(Modifier.height(gap))
     }
 }
 
@@ -725,7 +901,7 @@ private fun TitleBlock(now: NowPlaying, onOpenArtist: (String) -> Unit, onClose:
             SongTitle(
                 song.title.orEmpty(),
                 explicit = song.explicit,
-                style = OctoType.title.copy(fontWeight = FontWeight.Bold),
+                style = TitleStyle,
                 color = LocalContentColor.current,
                 markColor = accentInk,
                 titleModifier = Modifier.basicMarquee().closesPlayer(onClose),
@@ -826,7 +1002,7 @@ private fun Progress(now: NowPlaying, model: PlayerViewModel, onOpenSpeed: () ->
         color = LocalContentColor.current,
         trackColor = LocalContentColor.current.copy(alpha = 0.24f),
     )
-    Box(Modifier.fillMaxWidth().offset(y = (-8).dp)) {
+    Box(Modifier.fillMaxWidth().heightIn(min = TimesRoom).offset(y = (-8).dp)) {
         Text(playedSeconds.asClock(), style = times, color = mutedInk, modifier = Modifier.align(Alignment.CenterStart))
         Row(
             Modifier.align(Alignment.Center),
@@ -914,14 +1090,33 @@ private fun Transport(now: NowPlaying, model: PlayerViewModel) {
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TransportButton(OctoIcons.Previous, "Previous", 44.dp, model::previous, nudge = (-8).dp)
-        TransportButton(
-            if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play,
-            if (now.isPlaying) "Pause" else "Play",
-            56.dp,
-            model::togglePlayPause,
-        )
-        TransportButton(OctoIcons.Next, "Next", 44.dp, model::next, nudge = 8.dp)
+        val live = now.live
+        if (live != null) {
+            // A station stops and plays again live; Back and Next change
+            // station, while there are others in its list, up to its ends.
+            val lineup = live.lineup
+            if (lineup.shows) {
+                TransportButton(OctoIcons.Previous, "Previous station", 44.dp, model::previous, nudge = (-8).dp, enabled = lineup.hasPrevious)
+            }
+            TransportButton(
+                if (now.playWhenReady) LiveStopIcon else OctoIcons.Play,
+                if (now.playWhenReady) "Stop" else "Play",
+                56.dp,
+                model::togglePlayPause,
+            )
+            if (lineup.shows) {
+                TransportButton(OctoIcons.Next, "Next station", 44.dp, model::next, nudge = 8.dp, enabled = lineup.hasNext)
+            }
+        } else {
+            TransportButton(OctoIcons.Previous, "Previous", 44.dp, model::previous, nudge = (-8).dp)
+            TransportButton(
+                if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play,
+                if (now.isPlaying) "Pause" else "Play",
+                56.dp,
+                model::togglePlayPause,
+            )
+            TransportButton(OctoIcons.Next, "Next", 44.dp, model::next, nudge = 8.dp)
+        }
     }
 }
 
@@ -957,6 +1152,7 @@ private fun TransportButton(
     iconSize: Dp,
     onClick: () -> Unit,
     nudge: Dp = 0.dp,
+    enabled: Boolean = true,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -966,7 +1162,8 @@ private fun TransportButton(
     Box(
         Modifier
             .size(72.dp)
-            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+            .alpha(if (enabled) 1f else 0.3f)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button) {
                 onClick()
                 if (nudge != 0.dp) {
                     scope.launch {
@@ -1112,3 +1309,6 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+// The song's name in the player.
+private val TitleStyle = OctoType.title.copy(fontWeight = FontWeight.Bold)

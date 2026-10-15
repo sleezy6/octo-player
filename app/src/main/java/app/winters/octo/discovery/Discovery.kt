@@ -22,16 +22,26 @@ import app.winters.octo.server.serverSourceId
 import app.winters.octo.subsonic.Album
 import app.winters.octo.subsonic.OCTO_LIST_KINDS
 import app.winters.octo.subsonic.Playlist
+import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.Song
 import app.winters.octo.subsonic.SubsonicClient
 import app.winters.octo.subsonic.SubsonicException
 import dagger.Lazy
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import javax.inject.Inject
 import javax.inject.Singleton
+import app.winters.octo.subsonic.OCTO_STATIONS
+import app.winters.octo.playback.STATION_BATCH
+import app.winters.octo.playback.isStationId
+import app.winters.octo.lists.OctoListGroup
+import app.winters.octo.lists.octoListGroups
+import app.winters.octo.server.serverIdsOf
 
 // Octo holds back songs found online when a search asks for 12 songs or
 // fewer, so always ask for more than that.
@@ -57,8 +67,23 @@ data class OnlineArtist(val id: String, val name: String, val albumCount: Int, v
 
 // A station the server runs, played as the list of songs it has lined up.
 // A Made for you list is shown and played the same way, with its song count.
+// An internet radio station added to the server has its stream instead.
 @Serializable
-data class Station(val id: String, val name: String, val artwork: String?, val songCount: Int? = null)
+data class Station(val id: String, val name: String, val artwork: String?, val songCount: Int? = null, val streamUrl: String? = null, val homepage: String? = null)
+
+// Whether it is one of Octo's stations, which keep going, rather than a list
+// with an end (a Made for you list) or an internet radio stream.
+val Station.isRadio: Boolean get() = streamUrl == null && isStationId(id)
+
+// The stations Home shows, from the server's internet radio stations. Octo's
+// own carry their id as their cover and play the songs they have lined up;
+// any other plays its stream, like on the Radio stations screen. An added
+// station with no stream has nothing to play and is left off.
+internal fun homeStations(stations: List<RadioStation>, sourceId: String): List<Station> =
+    stations.filter { it.coverArt == it.id || it.streamUrl.isNotBlank() }.map {
+        val stream = it.streamUrl.takeIf { _ -> it.coverArt != it.id }
+        Station(it.id, it.name, ArtworkRef.Server(sourceId, it.coverArt ?: it.id).encode(), streamUrl = stream, homepage = it.homePageUrl?.takeIf(String::isNotBlank))
+    }
 
 // The lists Octo made for the listener (New Releases, Rediscover, Deep Cuts),
 // in that order, from the server's playlists. Only an Octo server that makes
@@ -110,6 +135,14 @@ class Discovery @Inject constructor(
     // Taken lazily: ServerSync needs PlaylistSync, which needs this.
     private val sync: Lazy<ServerSync>,
 ) {
+    // Lists the server no longer has, found out on their own page, by id.
+    private val _gone = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val gone: SharedFlow<String> = _gone.asSharedFlow()
+
+    fun listGone(id: String) {
+        _gone.tryEmit(id)
+    }
+
     // Whether a server is signed in, so there is anything to discover.
     val available: Flow<Boolean> = sessions.state.map { it is SessionState.SignedIn }
 
@@ -175,8 +208,18 @@ class Discovery @Inject constructor(
         val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return emptyList()
         if (!session.runsOcto) return emptyList()
         val (client, sourceId) = server() ?: return emptyList()
-        return client.radioStations().map { station ->
-            Station(station.id, station.name, ArtworkRef.Server(sourceId, station.coverArt ?: station.id).encode())
+        return homeStations(client.radioStations(), sourceId)
+    }
+
+    // Every list Octo made for the listener, by group, each shown as a card
+    // with its name, cover and song count: the Playlists page's "From Octo"
+    // and Home's shelves of mixes.
+    suspend fun octoLists(): List<Pair<OctoListGroup, List<Station>>> {
+        val session = (sessions.state.value as? SessionState.SignedIn)?.session ?: return emptyList()
+        if (!session.runsOcto) return emptyList()
+        val (client, sourceId) = server() ?: return emptyList()
+        return octoListGroups(client.playlists(), client.username).map { (group, lists) ->
+            group to lists.map { Station(it.id, it.name, ArtworkRef.Server(sourceId, it.coverArt ?: it.id).encode(), it.songCount) }
         }
     }
 
@@ -186,6 +229,20 @@ class Discovery @Inject constructor(
         if (!session.runsOcto) return emptyList()
         val (client, sourceId) = server() ?: return emptyList()
         return madeForYouLists(client.playlists(), sourceId)
+    }
+
+    // Whether the server sends a station's next songs (octoStations), so a
+    // station keeps going instead of ending with the songs it had lined up.
+    val keepsStationsGoing: Boolean
+        get() = (sessions.state.value as? SessionState.SignedIn)?.session?.extensions
+            ?.any { it == OCTO_STATIONS || it.startsWith("$OCTO_STATIONS:") } == true
+
+    // A station's next songs, none of `after` (its songs already queued, by
+    // the phone's ids; the server is told its own ids for them).
+    suspend fun stationMore(id: String, after: List<String>): List<TrackEntity> {
+        val (client, sourceId) = server() ?: return emptyList()
+        val serverIds = sources.serverIdsOf(sourceId, after)
+        return resolve(client, sourceId, client.stationSongs(id, STATION_BATCH, after.mapNotNull(serverIds::get)))
     }
 
     // The songs a station, or a Made for you list, has lined up now.

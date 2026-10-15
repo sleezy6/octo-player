@@ -81,13 +81,14 @@ fun SettingsPage(app: AppState, visit: Visit) {
         visit,
         "Settings",
         listOfNotNull(
-            PageSection("servers", "Servers", OctoIcons.Servers) { ServerRows(app) },
+            PageSection("servers", "Servers", OctoIcons.Servers, mark = if (serverUpdateWaits(app)) SERVER_UPDATE_MARK else null) { ServerRows(app) },
             PageSection("look", "Appearance", OctoIcons.Appearance) { AppearanceGroups(app, settings) },
             PageSection("playback", "Playback", OctoIcons.Playback) { PlaybackRows(app, settings) },
             PageSection("quality", AUDIO_QUALITY, OctoIcons.Equalizer, detail = "At home, away, and on this computer.") { AudioQualityRows(app, settings) },
             PageSection("offline", "Offline", OctoIcons.Download, detail = "Songs kept here to play without a connection.") { OfflineRows(app, settings) },
             PageSection("listening", "Listening", OctoIcons.Headphones) { ListeningRows(app, settings) },
             PageSection("lyrics", "Lyrics", OctoIcons.Lyrics) { LyricsRows(app, settings) },
+            PageSection("stations", "Radio stations", OctoIcons.Radio, detail = "Live stations on your server, and near you.") { RadioStationRows(app) },
             if (discord) PageSection("discord", "Discord", DiscordMark, detail = "Show what you're playing to your friends.", brand = true) { DiscordRows(app) } else null,
             PageSection("system", "System", OctoIcons.System) {
                 SystemRows(app)
@@ -244,6 +245,11 @@ private fun LyricsRows(app: AppState, settings: AppSettings) {
             app.settings.update { it.copy(lyrics = it.lyrics.copy(online = on)) }
             app.lyrics.state.value.song?.let { song -> app.lyrics.sources.refresh(song.id) }
         }
+        SwitchRow(
+            "Bloom fast singing",
+            "A word held long for its line swells and glows too. Off, only notes held a second or more bloom.",
+            settings.lyrics.bloomFast,
+        ) { on -> app.settings.update { it.copy(lyrics = it.lyrics.copy(bloomFast = on)) } }
         OutputTimingRow(app, settings)
     }
 }

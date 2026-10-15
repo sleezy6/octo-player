@@ -12,6 +12,7 @@ import androidx.media3.common.C
 import androidx.media3.common.ForwardingSimpleBasePlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.RenderersFactory
@@ -69,6 +70,11 @@ class AudioFocus(context: Context, private val onChange: (Int) -> Unit) {
 }
 
 private const val DUCKED_VOLUME = 0.2f
+
+// Whether a replacement keeps every item (by id and queue entry) where it
+// was, so only its words change.
+internal fun wordsOnly(before: List<Pair<String, String?>>, after: List<Pair<String, String?>>): Boolean =
+    before.isNotEmpty() && before == after && after.all { it.second != null }
 
 // The one player the rest of the phone sees: the lock screen, the
 // notification, headphones and the app all talk to this. It forwards to the
@@ -166,7 +172,11 @@ class OctoPlayer(
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> duck(true)
             AudioManager.AUDIOFOCUS_GAIN -> {
                 duck(false)
-                if (resumeWhenFocusReturns) deck.play()
+                if (resumeWhenFocusReturns) {
+                    // A station comes back live, not from where it paused.
+                    if (onStation) rejoin()
+                    deck.play()
+                }
                 resumeWhenFocusReturns = false
             }
         }
@@ -179,7 +189,36 @@ class OctoPlayer(
             resumeWhenFocusReturns = false
             fader.interrupt()
         }
+        if (onStation) {
+            // A station has no pause: it stops, and lets the stream go.
+            if (!playWhenReady) {
+                deck.pause()
+                deck.stop()
+                releaseFocus()
+                return Futures.immediateVoidFuture()
+            }
+            // Play joins what is on air now. Audio held from before a pause
+            // (headphones pulled out, say) or a stopped stream is let go and
+            // the stream opened afresh; one just opened plays as it is.
+            if (!deck.playWhenReady && deck.playbackState != Player.STATE_BUFFERING) rejoin()
+        }
         return super.handleSetPlayWhenReady(playWhenReady)
+    }
+
+    // A stopped station opens at the live edge, never where it stopped.
+    override fun handlePrepare(): ListenableFuture<*> {
+        if (onStation && deck.playbackState == Player.STATE_IDLE) deck.seekToDefaultPosition()
+        return super.handlePrepare()
+    }
+
+    // Whether a live station is on.
+    private val onStation: Boolean get() = deck.currentMediaItem?.mediaId?.let(::isRadio) == true
+
+    // Opens the station's stream afresh, at the live edge.
+    private fun rejoin() {
+        if (deck.playbackState != Player.STATE_IDLE) deck.stop()
+        deck.seekToDefaultPosition()
+        deck.prepare()
     }
 
     // Anything that changes what plays or where ends a blend first, so the
@@ -266,8 +305,11 @@ class OctoPlayer(
         return super.handleMoveMediaItems(fromIndex, toIndex, newIndex)
     }
 
+    // Items put back with new words only (a station's song title, say) are
+    // the same items in the same places: a blend under way goes on.
     override fun handleReplaceMediaItems(fromIndex: Int, toIndex: Int, mediaItems: List<MediaItem>): ListenableFuture<*> {
-        fader.interrupt()
+        val before = (fromIndex until toIndex.coerceAtMost(deck.mediaItemCount)).map { deck.getMediaItemAt(it).let { item -> item.mediaId to item.entryId } }
+        if (!wordsOnly(before, mediaItems.map { it.mediaId to it.entryId })) fader.interrupt()
         return super.handleReplaceMediaItems(fromIndex, toIndex, stamped(mediaItems))
     }
 

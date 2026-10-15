@@ -1,5 +1,9 @@
 package app.winters.octo.desktop
 
+import app.winters.octo.serverupdate.LaterStore
+import app.winters.octo.serverupdate.ServerUpdateHttp
+import app.winters.octo.serverupdate.ServerUpdateWatcher
+import app.winters.octo.serverupdate.ownAddresses
 import app.winters.octo.ui.family.streamParams as streamParamsFor
 import app.winters.octo.ui.family.appPicksQuality
 import app.winters.octo.subsonic.StreamQuality
@@ -17,6 +21,7 @@ import app.winters.octo.desktop.audio.SoundTarget
 import app.winters.octo.desktop.health.HealthModel
 import app.winters.octo.desktop.home.HomeStore
 import app.winters.octo.desktop.home.KeptShelves
+import app.winters.octo.desktop.library.LibraryState
 import app.winters.octo.home.HomeShelfStore
 import app.winters.octo.home.homeSectionOrder
 import app.winters.octo.desktop.library.LibraryStore
@@ -51,6 +56,13 @@ import app.winters.octo.desktop.downloads.DownloadsModel
 import kotlinx.coroutines.delay
 import app.winters.octo.desktop.search.OmniboxState
 import app.winters.octo.desktop.search.SearchModel
+import app.winters.octo.desktop.search.SearchFilter
+import app.winters.octo.desktop.liveradio.FoundSong
+import app.winters.octo.desktop.liveradio.LiveHeart
+import app.winters.octo.desktop.search.FetchPhase
+import app.winters.octo.ui.family.outsideActions
+import app.winters.octo.playback.stoppedLine
+import app.winters.octo.playback.isRadio
 import app.winters.octo.desktop.server.Accounts
 import app.winters.octo.desktop.server.Connection
 import app.winters.octo.desktop.server.ServerFactsModel
@@ -86,12 +98,20 @@ import app.winters.octo.desktop.library.PlaylistArtStore
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.map
 import app.winters.octo.desktop.motion.MotionCovers
 import kotlinx.coroutines.launch
 import coil3.ImageLoader
 import okhttp3.OkHttpClient
+import app.winters.octo.desktop.queue.StationRefill
+import app.winters.octo.playback.STATION_BATCH
+import app.winters.octo.playback.isStationId
+import app.winters.octo.subsonic.OCTO_STATIONS
+import app.winters.octo.desktop.liveradio.LiveRadioModel
+import app.winters.octo.liveradio.RadioBrowser
 
 // How long a notice said in passing stays up.
 const val PASSING_NOTICE_MS = 6_000L
@@ -136,7 +156,12 @@ class AppState(
     homeShelves: File? = null,
     // Opens a web page for the Import page; the screenshots open none.
     browse: (String) -> Unit = { openInBrowser(it) },
+    // The live radio catalog; tests give one at a pretend address.
+    radioCatalog: RadioBrowser = RadioBrowser(catalogHttp(http), liveRadioAgent()),
 ) {
+    // Opens a web page in the listener's browser.
+    val openUrl: (String) -> Unit = browse
+
     // The Sound page's settings, kept on the engine; none for the silent player.
     val sound: SoundController? = (player as? SoundTarget)?.let { SoundController(it, settings, scope) }
 
@@ -193,6 +218,25 @@ class AppState(
     // The Import page, on an Octo server.
     val imports = ImportModel({ connection?.client }, scope, openUrl = browse)
 
+    // Live radio near the listener, from the Radio Browser catalog, and the
+    // stations kept on this computer.
+    val liveRadio = LiveRadioModel(settings, radioCatalog, { connection }, scope)
+
+    // The live player's heart, for the song a station has on air.
+    val liveHeart = LiveHeart(
+        scope,
+        find = { query -> search?.search(query, SearchFilter.Songs)?.let { found -> found.library.songs.map { FoundSong(it, true) } + found.outside.songs.map { FoundSong(it, false) } } },
+        star = { song, on -> setStarred(listOf(fetches?.landedId(song.id)?.let { id -> song.copy(id = id) } ?: song), on) },
+        missed = { _, query -> searchFor(query) },
+        // Octo downloads a song found online once asked; a family member
+        // who saves songs saves it instead.
+        add = { song ->
+            val fetching = fetches
+            if (fetching != null && outsideActions(family.me).addLabel == null) fetching.request(song.id) else setStarred(listOf(song), true)
+        },
+        landed = { song -> fetches?.phase(song.id) == FetchPhase.Done },
+    )
+
     // Family, on an Octo server with it on: the account's abilities, which song actions and
     // the Family page follow.
     val family = FamilyModel({ connection?.client }, { connection?.family == true }, scope)
@@ -221,6 +265,33 @@ class AppState(
     // How the kept servers answer, and the scan and user of the one in use,
     // for Settings > Servers.
     val serverFacts = ServerFactsModel(accounts, { connection }, scope)
+
+    // A newer Octo for the server in use, for its admin, and updating it.
+    // Once an update followed here is in, the server's facts are read again.
+    val serverUpdate = ServerUpdateWatcher(
+        scope,
+        object : LaterStore {
+            override suspend fun dismissed(server: String): String? = settings.current.serverUpdateLater[server]
+
+            override suspend fun dismiss(server: String, tag: String) {
+                settings.update { it.copy(serverUpdateLater = it.serverUpdateLater + (server to tag)) }
+            }
+        },
+        onFinished = { serverFacts.refresh() },
+    )
+
+    // Asked only at the server's own addresses, signed as every other call.
+    private val serverUpdateCalls = ServerUpdateHttp(http) { connection?.let { ownAddresses(it.client, it.headers) } }
+
+    private fun followServerUpdate(connection: Connection?) {
+        serverUpdate.bind(connection?.takeIf { it.isOcto }?.server?.id, serverUpdateCalls)
+    }
+
+    // Octo's dashboard on the server in use, for what the app leaves to it.
+    fun openDashboard() {
+        val base = connection?.client?.baseUrl ?: return
+        openUrl(base.newBuilder().encodedPath("/admin/").query(null).build().toString())
+    }
 
     // The user's playlists, for the sidebar and "Add to playlist".
     var playlists by mutableStateOf<List<Playlist>>(emptyList())
@@ -332,6 +403,14 @@ class AppState(
     // queue edit; shown only while the notice is still the one it came with.
     var noticeAction by mutableStateOf<NoticeAction?>(null)
 
+    // Keeps a station going, on a server that sends a station's next songs.
+    val stationRefill = StationRefill(
+        player,
+        scope,
+        supported = { connection?.supports(OCTO_STATIONS) == true },
+        more = { id, after -> connection?.client?.stationSongs(id, STATION_BATCH, after).orEmpty() },
+    ).also { it.start() }
+
     // Keeps music playing when the queue runs out, when the listener wants it.
     val autoplay = Autoplay(
         player,
@@ -350,6 +429,8 @@ class AppState(
                 )
             }
         },
+        standsDown = stationRefill::keepsGoing,
+        standsDownChanged = stationRefill.settled,
     ).also { it.start() }
 
     // ---- End of the queue's edits ----
@@ -379,6 +460,7 @@ class AppState(
         }
         queueSync.start()
         watchProblems()
+        followLive()
         restored?.let(::signedIn)
     }
 
@@ -390,7 +472,12 @@ class AppState(
                 if (problem == null) return@collect
                 val song = problem.song
                 if (song != null) failedSongs[song.id] = problem.words
-                notice = if (song != null) skippedLine(song.title, problem.words) else problem.words
+                // A station that fails stops there; a song is skipped.
+                notice = when {
+                    song == null -> problem.words
+                    isRadio(song.id) -> stoppedLine(song.title, problem.words)
+                    else -> skippedLine(song.title, problem.words)
+                }
                 noticeDetail = problem.detail
             }
         }
@@ -440,6 +527,9 @@ class AppState(
         oldDownloads?.close()
         startReading(views)
     }
+
+    // Follows the library read of the server in use.
+    private var libraryWatch: Job? = null
 
     // What the pages read a server through: its library, finds, search and
     // Home. Made before any of it shows, and read only after.
@@ -533,6 +623,8 @@ class AppState(
         imports.forget()
         family.forget()
         serverFacts.forget()
+        liveRadio.forget()
+        followServerUpdate(connection)
         // The family decides what adding an outside song does and who picks
         // the stream quality, so it is read before the first song plays.
         if (connection.family) scope.launch { family.plan() }
@@ -541,6 +633,12 @@ class AppState(
 
     private fun startReading(views: ServerViews) {
         views.library.load()
+        // Kept songs are checked against each read of the library, such as
+        // the one after a song's file is swapped for a better copy.
+        libraryWatch?.cancel()
+        libraryWatch = scope.launch {
+            views.library.state.filterIsInstance<LibraryState.Ready>().collect { offline.poke() }
+        }
         views.upgrades?.start()
         views.downloads?.start()
         // Whether songs can be deleted from disk, for every song menu.
@@ -606,6 +704,8 @@ class AppState(
 
     private fun signedOut() {
         val form = SignInForm(accounts.last)
+        libraryWatch?.cancel()
+        libraryWatch = null
         upgrades?.close()
         downloads?.close()
         together {
@@ -620,6 +720,8 @@ class AppState(
             health.forget()
             family.forget()
             serverFacts.forget()
+            liveRadio.forget()
+            followServerUpdate(null)
             playlists = emptyList()
             fullPlayer = false
             navigator.startOver()
@@ -764,10 +866,25 @@ class AppState(
     // the page it was played from names it (queueNameFor).
     fun play(songs: List<Song>, start: Int = 0, shuffle: Boolean = false, source: String? = null) {
         if (songs.isEmpty()) return
+        // A station's page plays the station, which keeps going.
+        val page = navigator.current.page
+        if (source == null && page is Page.Playlist && isStationId(page.id)) {
+            playlists.firstOrNull { it.id == page.id && (it.octoGroup == null || it.octoGroup == "station") }
+                ?.let { return playStation(songs, start, shuffle, page.id, it.name) }
+        }
         val listName = { id: String -> playlists.firstOrNull { it.id == id }?.name ?: liveLists.byId(id)?.name }
         val name = source ?: queueNameFor(navigator.current.page, songs, listName)
         player.play(songs, if (shuffle) (songs.indices).random() else start, shuffle, QueueSource.Played(name))
         jumpList?.let { list -> jumpTargetFor(navigator.current.page, songs, listName)?.let(list::played) }
+    }
+
+    // Plays a station's songs from one of them, under its name; as they run
+    // low, more of its kind are added. Shuffled, its songs are put in a new
+    // order, so the songs added later still come after them.
+    fun playStation(songs: List<Song>, start: Int, shuffle: Boolean, id: String, name: String) {
+        if (songs.isEmpty()) return
+        val order = if (shuffle) songs.shuffled() else songs
+        player.play(order, if (shuffle) 0 else start, false, QueueSource.Station(id, name))
     }
 
     fun playNext(songs: List<Song>) = player.playNext(songs)
@@ -898,8 +1015,9 @@ class AppState(
     fun perform(shortcut: Shortcut): Boolean {
         when (shortcut) {
             Shortcut.PlayPause -> player.togglePlay()
-            Shortcut.SeekBack -> player.seekTo(player.positionMs() - SEEK_STEP_MS)
-            Shortcut.SeekForward -> player.seekTo(player.positionMs() + SEEK_STEP_MS)
+            // A live station has no place to move to.
+            Shortcut.SeekBack -> if (player.state.value.live == null) player.seekTo(player.positionMs() - SEEK_STEP_MS) else return false
+            Shortcut.SeekForward -> if (player.state.value.live == null) player.seekTo(player.positionMs() + SEEK_STEP_MS) else return false
             Shortcut.VolumeUp -> setVolume(player.state.value.volume + VOLUME_STEP)
             Shortcut.VolumeDown -> setVolume(player.state.value.volume - VOLUME_STEP)
             Shortcut.Search -> if (connection != null) openSearch() else return false
@@ -936,3 +1054,14 @@ class AppState(
 
 // How long the sidebar's playlists count as fresh when the window comes back.
 const val PLAYLISTS_FRESH_MS = 60_000L
+
+// What the app calls itself to the radio catalog: "Octo/1.7.0 (desktop)".
+fun liveRadioAgent(version: String? = System.getProperty("octo.version")): String =
+    "Octo/${version?.trim()?.takeIf(String::isNotEmpty) ?: "dev"} (desktop)"
+
+// The app's connections, naming the app to the catalog as liveRadioAgent
+// does, over the name every other host hears.
+private fun catalogHttp(http: OkHttpClient): OkHttpClient {
+    val agent = liveRadioAgent()
+    return http.newBuilder().addNetworkInterceptor { chain -> chain.proceed(chain.request().newBuilder().header("User-Agent", agent).build()) }.build()
+}

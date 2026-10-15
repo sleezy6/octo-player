@@ -131,6 +131,8 @@ fn item(id: &str, path: &Path) -> QueueItem {
         headers: Vec::new(),
         genre: None,
         bpm: None,
+        live: false,
+        hls: false,
     }
 }
 
@@ -886,6 +888,7 @@ fn a_smart_plan_starts_early_enters_late_and_cuts_the_outgoing_song() {
             filter_sweeps: true,
             match_tempo: false,
             max_overlap_ms: 8_000,
+            fade_curve: crate::automix::FadeCurve::EqualPower,
         })
         .unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 0, true).unwrap();
@@ -941,6 +944,7 @@ fn a_late_plan_into_a_song_entered_part_way_still_blends() {
             filter_sweeps: false,
             match_tempo: false,
             max_overlap_ms: 8_000,
+            fade_curve: crate::automix::FadeCurve::EqualPower,
         })
         .unwrap();
     engine.load(vec![item("a", &a), item("b", &b)], 0, 9_500, true).unwrap();
@@ -1083,6 +1087,7 @@ fn a_song_with_a_profile_is_planned_from_it_without_the_live_level() {
             filter_sweeps: true,
             match_tempo: false,
             max_overlap_ms: 8_000,
+            fade_curve: crate::automix::FadeCurve::EqualPower,
         })
         .unwrap();
     engine.set_song_profile("a".into(), Some(profile_of(12_000, 0))).unwrap();
@@ -1193,5 +1198,88 @@ fn a_smart_plan_is_made_with_the_decoded_lengths() {
     assert_eq!((start_ms, overlap_ms), (9_500, 500), "{reason}");
     pump.play_out();
     events.wait_for("queue end", Duration::from_secs(10), |e| matches!(e, EngineEvent::QueueEnded));
+    engine.shutdown();
+}
+
+#[test]
+fn a_live_radio_stream_plays_on_with_its_titles_and_takes_no_seek() {
+    use crate::testing::http_server::ScriptServer;
+    let server = ScriptServer::start(|_, conn, stopped| super::live::icy_radio(stopped, conn));
+    let (engine, events, _, pump) = driven_engine();
+    let radio = QueueItem { source: server.url("/stream"), live: true, ..item("radio", Path::new("")) };
+    // A start time means nothing to a live stream.
+    engine.load(vec![radio], 0, 5_000, true).unwrap();
+    let started =
+        play_until(&pump, &events, "start", 1_000, |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    let EngineEvent::TrackStarted { info: Some(info), .. } = started else { panic!("{started:?}") };
+    assert_eq!((info.codec.as_str(), info.duration_ms), ("mp3", None));
+    let second =
+        |e: &EngineEvent| matches!(e, EngineEvent::StreamTitle { title, .. } if title.ends_with("Song 1"));
+    play_until(&pump, &events, "the second title", 1_000, second);
+    // Block 3 is a second into the stream: the title comes as that is heard.
+    let heard = engine.position().position_ms;
+    assert!((900.0..2_000.0).contains(&heard), "{heard}");
+    let titles: Vec<(String, String, String)> = events
+        .all()
+        .into_iter()
+        .filter_map(|e| match e {
+            EngineEvent::StreamTitle { item_id, title, url } => Some((item_id, title, url)),
+            _ => None,
+        })
+        .collect();
+    let named = |t: &str, url: &str| ("radio".to_string(), t.to_string(), url.to_string());
+    assert_eq!(
+        titles,
+        [
+            named("Test FM - Song 0", "https://img.test/0.jpg"),
+            named("Test FM - Song 1", "https://img.test/1.jpg")
+        ]
+    );
+    // A seek is ignored: it plays on from where it was, over the same connection.
+    engine.seek(60_000).unwrap();
+    for _ in 0..50 {
+        pump.play();
+    }
+    let after = engine.position().position_ms;
+    assert!(after > heard && after < heard + 2_000.0, "{heard} then {after}");
+    assert_eq!(server.asked().len(), 1);
+    assert_eq!(events.story(), ["start radio"]);
+    engine.shutdown();
+}
+
+#[test]
+fn a_live_stream_paused_a_long_while_starts_again_where_it_is_now() {
+    use crate::testing::http_server::ScriptServer;
+    let server = ScriptServer::start(|_, conn, stopped| super::live::icy_radio(stopped, conn));
+    let (engine, events, _, pump) = driven_engine();
+    let radio = QueueItem { source: server.url("/stream"), live: true, ..item("radio", Path::new("")) };
+    engine.load(vec![radio], 0, 0, true).unwrap();
+    play_until(&pump, &events, "start", 1_000, |e| matches!(e, EngineEvent::TrackStarted { .. }));
+    for _ in 0..20 {
+        pump.play();
+    }
+    // A short pause carries on over the same connection.
+    engine.pause().unwrap();
+    pump.play();
+    engine.play().unwrap();
+    for _ in 0..20 {
+        pump.play();
+    }
+    assert_eq!(server.asked().len(), 1);
+    // A long one (300 ms in tests) connects again, at the live edge.
+    engine.pause().unwrap();
+    pump.play();
+    std::thread::sleep(Duration::from_millis(400));
+    engine.play().unwrap();
+    let again = |e: &EngineEvent| matches!(e, EngineEvent::TrackStarted { .. });
+    for _ in 0..1_000 {
+        pump.play();
+        if events.all().iter().filter(|e| again(e)).count() == 2 {
+            break;
+        }
+    }
+    assert_eq!(events.all().iter().filter(|e| again(e)).count(), 2, "{:?}", events.story());
+    assert_eq!(server.asked().len(), 2);
+    assert!(engine.position().position_ms < 2_000.0, "{}", engine.position().position_ms);
     engine.shutdown();
 }

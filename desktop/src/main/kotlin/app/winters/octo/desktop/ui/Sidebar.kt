@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.desktop.pages.serverUpdateWaits
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.focus.onFocusChanged
 import app.winters.octo.design.LocalFocusVisibility
@@ -83,6 +84,8 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.ui.family.FAMILY
 import dev.chrisbanes.haze.HazeState
 import kotlinx.coroutines.launch
+import app.winters.octo.desktop.home.octoLists
+import app.winters.octo.desktop.liveradio.LIVE_RADIO
 
 // A place in the sidebar: the page, its name and icon.
 private class Place(val page: Page, val label: String, val icon: ImageVector)
@@ -139,6 +142,8 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
                 YourPlaces.forEach { place ->
                     item(key = "p:${place.label}") { NavRow(place.label, place.icon, lit == SidebarItem.Top(place.page), rail) { go(place.page) } }
                 }
+                // Live radio from the radio catalog, on any server.
+                item(key = "p:live-radio") { NavRow(LIVE_RADIO, OctoIcons.Radio, lit == SidebarItem.Top(Page.LiveRadio), rail) { go(Page.LiveRadio) } }
                 // Only an Octo server imports; the page itself says when one is too old to.
                 if (app.connection?.isOcto == true) {
                     item(key = "p:imports") { NavRow("Import", OctoIcons.Download, lit == SidebarItem.Top(Page.Imports), rail) { go(Page.Imports) } }
@@ -149,7 +154,11 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
                 }
             }
             val pinned = frame.pinnedPlaylists
-            val playlists = app.playlists.sortedBy { pinned.indexOf(it.id).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }
+            val listener = app.connection?.client?.username.orEmpty()
+            val isOcto = app.connection?.isOcto == true
+            // Octo's own lists have a group of their own, below the listener's.
+            val fromOcto = octoLists(app.playlists, listener, isOcto).flatMap { it.second }
+            val playlists = app.playlists.filter { it !in fromOcto }.sortedBy { pinned.indexOf(it.id).takeIf { i -> i >= 0 } ?: Int.MAX_VALUE }
             group(app, "playlists", "Playlists", rail, frame.foldedGroups, action = {
                 val pointer = LocalPointer.current
                 IconAction(OctoIcons.AddToLibrary, "New playlist or live list", { showNewListMenu(app, pointer.point) }, size = ControlSize, iconSize = IconSize.Table, tint = OctoColors.TextSecondary)
@@ -160,12 +169,26 @@ fun Sidebar(app: AppState, backdrop: HazeState, modifier: Modifier = Modifier, r
                     PlaylistRow(app, playlist, lit == SidebarItem.PlaylistItem(playlist.id), rail, playlist.id in pinned)
                 }
             }
+            if (fromOcto.isNotEmpty()) {
+                group(app, "from-octo", "From Octo", rail, frame.foldedGroups) {
+                    items(fromOcto, key = { "octo:${it.id}" }) { playlist ->
+                        PlaylistRow(app, playlist, lit == SidebarItem.PlaylistItem(playlist.id), rail, playlist.id in pinned)
+                    }
+                }
+            }
         }
         Separator(Modifier.padding(vertical = Space.S))
         DownloadsRow(app, rail)
         NavRow("Sound", OctoIcons.Sound, lit == SidebarItem.Top(Page.Sound), rail) { go(Page.Sound) }
-        // A small dot while an update waits to go in; the news itself is in Settings > About.
-        NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings), rail, mark = app.updates?.ready != null) { go(Page.Settings) }
+        // A small dot while an update waits to go in, the news itself in
+        // Settings > About, or while a newer Octo waits for the server, in Settings > Servers.
+        val serverUpdate = serverUpdateWaits(app)
+        val mark = when {
+            app.updates?.ready != null -> "update ready"
+            serverUpdate -> "server update available"
+            else -> null
+        }
+        NavRow("Settings", OctoIcons.Settings, lit == SidebarItem.Top(Page.Settings), rail, mark = mark) { go(Page.Settings) }
     }
 }
 
@@ -259,12 +282,13 @@ private fun NavRow(
     selected: Boolean,
     rail: Boolean,
     modifier: Modifier = Modifier,
-    mark: Boolean = false,
+    // What waits there, which puts a small dot by it.
+    mark: String? = null,
     state: String? = null,
     trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
 ) {
-    val named = listOfNotNull(label, "update ready".takeIf { mark }, state).joinToString(", ")
+    val named = listOfNotNull(label, mark, state).joinToString(", ")
     val row: @Composable () -> Unit = {
         Box(
             modifier
@@ -283,10 +307,10 @@ private fun NavRow(
                 Box {
                     Glyph(icon, size = IconSize.Toolbar, tint = if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary)
                     // On the rail the dot sits on the icon's corner.
-                    if (mark && rail) NavMark(Modifier.align(Alignment.TopEnd))
+                    if (mark != null && rail) NavMark(Modifier.align(Alignment.TopEnd))
                 }
                 if (!rail) Txt(label, DesktopType.body, if (selected) OctoColors.TextPrimary else OctoColors.TextSecondary, Modifier.weight(1f, fill = trailing != null))
-                if (mark && !rail) NavMark()
+                if (mark != null && !rail) NavMark()
                 if (trailing != null && !rail) trailing()
             }
         }

@@ -29,6 +29,14 @@ import app.winters.octo.home.Rediscovery
 import app.winters.octo.home.shows
 import app.winters.octo.home.answered
 import app.winters.octo.listening.PlayHistory
+import app.winters.octo.liveradio.KeptStations
+import app.winters.octo.liveradio.LiveShelfEntry
+import app.winters.octo.liveradio.LiveRadioStore
+import app.winters.octo.liveradio.LiveStation
+import app.winters.octo.liveradio.RadioBrowser
+import app.winters.octo.liveradio.lineupOf
+import app.winters.octo.liveradio.radioId
+import app.winters.octo.liveradio.streamUrl
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.server.ServerSync
 import app.winters.octo.subsonic.SubsonicException
@@ -49,6 +57,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
+import app.winters.octo.discovery.isRadio
+import app.winters.octo.lists.OctoListGroup
+import app.winters.octo.home.MixShelves
+import app.winters.octo.home.mixGroup
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -64,7 +76,13 @@ class HomeViewModel @Inject constructor(
     favourites: FavouritesDao,
     private val chartLists: ChartLists,
     keptFiles: KeptShelvesFiles,
+    private val liveRadio: LiveRadioStore,
+    private val radioCatalog: RadioBrowser,
 ) : ViewModel() {
+    // The live stations kept on this phone, for the Live radio shelf.
+    val keptStations: StateFlow<KeptStations> =
+        liveRadio.kept.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), KeptStations())
+
     // What is pinned to the front of Home, in its order.
     val pinned: StateFlow<List<PinnedItem>> =
         pins.items.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -126,6 +144,11 @@ class HomeViewModel @Inject constructor(
     var madeForYou by mutableStateOf<List<Station>>(emptyList())
         private set
 
+    // Octo's mixes for the listener by group (years, genres, artists,
+    // countries), for Home's shelves of mixes; kept through a failed load.
+    var mixes by mutableStateOf<Map<OctoListGroup, List<Station>>>(emptyMap())
+        private set
+
     // The first songs of the server's chart of the moment, for Home's Charts
     // row; empty on a server without charts, kept through a failed load.
     var charts by mutableStateOf<List<TrackEntity>>(emptyList())
@@ -156,6 +179,17 @@ class HomeViewModel @Inject constructor(
     private var libraryEmpty = false
 
     init {
+        // A list found gone on its own page comes off Home, and the lists are
+        // read again.
+        viewModelScope.launch {
+            discovery.gone.collect { id ->
+                stations = stations.filterNot { it.id == id }
+                madeForYou = madeForYou.filterNot { it.id == id }
+                mixes = mixes.mapValues { (_, lists) -> lists.filterNot { it.id == id } }
+                stationsLoadedAt = null
+                loadStations()
+            }
+        }
         viewModelScope.launch {
             combine(dao.libraryTrackCount(), serverSync.last.map { it?.at }) { count, syncedAt -> count to syncedAt }
                 .distinctUntilChanged()
@@ -178,6 +212,7 @@ class HomeViewModel @Inject constructor(
                 val last = server?.let { withContext(Dispatchers.IO) { kept.read(it) } } ?: KeptShelves()
                 stations = answered(stations, last.stations)
                 madeForYou = answered(madeForYou, last.madeForYou)
+                mixes = answered(mixes, keptMixes(last.mixes))
                 charts = answered(charts, last.charts)
                 if (server != null) {
                     sections.filterNotNull().first()
@@ -201,7 +236,7 @@ class HomeViewModel @Inject constructor(
     // The server shelves Home draws now: a hidden one is not asked for.
     private fun wantedStationShelves(): Set<HomeSection> {
         val entries = sections.value ?: return emptySet()
-        return setOf(HomeSection.Stations, HomeSection.MadeForYou).filterTo(HashSet()) { entries.shows(it) }
+        return (setOf(HomeSection.Stations, HomeSection.InternetRadio, HomeSection.MadeForYou) + MixShelves).filterTo(HashSet()) { entries.shows(it) }
     }
 
     // The chart is wanted while its shelf shows, and while the library is
@@ -226,16 +261,21 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    // Plays what a station has lined up today. Taps while one is on the
-    // way are ignored.
+    // Plays what a station has lined up today, or an added station's stream.
+    // Taps while one is on the way are ignored.
     fun playStation(station: Station) {
         if (startingStation != null) return
+        if (station.streamUrl != null) {
+            playback.playTracks(listOf(station.radioId()))
+            return
+        }
         startingStation = station.id
         viewModelScope.launch {
             try {
                 val songs = withContext(Dispatchers.IO) { discovery.stationSongs(station.id) }
                 if (songs.isEmpty()) feedback.show("Nothing is playing on ${station.name} right now")
-                playback.playTracks(songs.map { it.id }, 0)
+                val ids = songs.map { it.id }
+                if (station.isRadio) playback.playStation(ids, 0, station.id, station.name) else playback.playTracks(ids, 0, source = station.name)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: SubsonicException.NotFound) {
@@ -252,6 +292,24 @@ class HomeViewModel @Inject constructor(
             } finally {
                 startingStation = null
             }
+        }
+    }
+
+    // A station on the Live radio shelf plays its stream, with the shelf's
+    // other stations in its order for Back and Next; for one kept on this
+    // phone, the catalog hears it was started.
+    fun playLive(entries: List<LiveShelfEntry>, index: Int) {
+        val entry = entries.getOrNull(index) ?: return
+        val (ids, start) = lineupOf(entries, index, { it.streamUrl }, { it.radioId() })
+        playback.playLineup(ids, start, source = HomeSection.InternetRadio.title)
+        val uuid = (entry as? LiveShelfEntry.Kept)?.station?.uuid ?: (entry as? LiveShelfEntry.Server)?.kept?.uuid
+        if (uuid != null) viewModelScope.launch { radioCatalog.started(uuid) }
+    }
+
+    fun removeKept(station: LiveStation) {
+        viewModelScope.launch {
+            liveRadio.drop(station.uuid)
+            feedback.undoable("Removed ${station.name}") { viewModelScope.launch { liveRadio.keep(station) } }
         }
     }
 
@@ -304,7 +362,7 @@ class HomeViewModel @Inject constructor(
         stationsJob = viewModelScope.launch {
             var failed = false
             var answers = 0
-            if (HomeSection.Stations in wanted) {
+            if (HomeSection.Stations in wanted || HomeSection.InternetRadio in wanted) {
                 try {
                     val got = withContext(Dispatchers.IO) { discovery.stations() }
                     stations = answered(stations, got)
@@ -328,6 +386,18 @@ class HomeViewModel @Inject constructor(
                     Log.w("Octo", "made for you failed to load: ${e.javaClass.simpleName}")
                 }
             }
+            if (wanted.any { it in MixShelves }) {
+                try {
+                    val got = withContext(Dispatchers.IO) { discovery.octoLists() }.toMap().filterKeys { group -> MixShelves.any { it.mixGroup == group } }
+                    mixes = answered(mixes, got)
+                    answers++
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failed = true
+                    Log.w("Octo", "mixes failed to load: ${e.javaClass.simpleName}")
+                }
+            }
             if (!failed) {
                 stationsLoadedAt = SystemClock.elapsedRealtime()
                 stationsAsked = wanted
@@ -347,9 +417,13 @@ class HomeViewModel @Inject constructor(
     // next start or a switch back to it.
     private fun keepShelves() {
         val server = shelvesFrom ?: return
-        val shelves = KeptShelves(stations, madeForYou, charts)
+        val shelves = KeptShelves(stations, madeForYou, charts, mixes.mapKeys { it.key.name })
         viewModelScope.launch(keeping) { kept.write(server, shelves) }
     }
+
+    // Mixes as kept, by group; a group this app no longer knows is dropped.
+    private fun keptMixes(kept: Map<String, List<Station>>): Map<OctoListGroup, List<Station>> =
+        kept.mapNotNull { (name, lists) -> OctoListGroup.entries.firstOrNull { it.name == name }?.let { it to lists } }.toMap()
 
     private suspend fun reroll() {
         surprise = dao.randomAlbums(20)

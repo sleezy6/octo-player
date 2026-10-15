@@ -70,6 +70,11 @@ const IDLE_DEVICE_AFTER: Duration = Duration::from_secs(5);
 
 const DEFAULT_DEVICE_CHECK: Duration = Duration::from_secs(2);
 
+// A live stream paused this long starts again where its server is now,
+// rather than minutes behind it from what was held.
+const LIVE_PAUSE_LIMIT: Duration =
+    if cfg!(test) { Duration::from_millis(300) } else { Duration::from_secs(30) };
+
 pub enum Command {
     Load { items: Vec<QueueItem>, start_index: usize, start_ms: u64, play: bool },
     PlayNext(Vec<QueueItem>),
@@ -342,6 +347,8 @@ struct Player {
     // Where the song was when the device was lost and none would open, to
     // carry on from there once one does.
     lost_at: Option<Moment>,
+    // When playback was paused, while it is.
+    paused_at: Option<Instant>,
     infos: HashMap<u64, TrackInfo>,
     block: Vec<f32>,
     markers: Vec<Marker>,
@@ -391,6 +398,7 @@ pub fn run(driven: Driven) {
         device_running: false,
         last_default_check: Instant::now(),
         lost_at: None,
+        paused_at: None,
         infos: HashMap::new(),
         block: vec![0.0; 2048],
         markers: Vec::new(),
@@ -662,16 +670,19 @@ impl Player {
     }
 
     fn http_for(&self, index: usize) -> HttpOptions {
+        let item = &self.queue[index].item;
         HttpOptions {
             agent: self.shared.agent.clone(),
-            headers: self.queue[index]
-                .item
-                .headers
-                .iter()
-                .map(|h| (h.name.clone(), h.value.clone()))
-                .collect(),
+            headers: item.headers.iter().map(|h| (h.name.clone(), h.value.clone())).collect(),
+            live: item.live,
+            hls: item.hls,
             ..Default::default()
         }
+    }
+
+    // Whether the playing entry is a live stream.
+    fn current_is_live(&self) -> bool {
+        self.current_entry().is_some_and(|e| e.item.live)
     }
 
     fn open_deck(&self, index: usize, start_secs: f64) -> Deck {
@@ -694,6 +705,8 @@ impl Player {
     // Starts the current entry from `secs`, replacing whatever plays.
     fn start_current(&mut self, secs: f64, transition: Transition, reason: EndReason) {
         let Some(index) = self.current else { return };
+        // A live stream starts wherever its server is.
+        let secs = if self.queue[index].item.live { 0.0 } else { secs };
         if !self.ensure_output() {
             // With a song already loaded, carry on with this one once a
             // device opens.
@@ -703,6 +716,8 @@ impl Player {
             return;
         }
         self.lost_at = None;
+        // Loaded paused counts as paused from now.
+        self.paused_at = (!self.playing).then(Instant::now);
         let previous = self.heard.and_then(|k| self.index_of(k));
         let loudness = self.loudness(index, previous);
         // A stream waits until `start_after` of it is decoded (or all of it,
@@ -754,6 +769,12 @@ impl Player {
         }
         self.playing = true;
         self.scouting.set_running(true);
+        let long_paused = self.paused_at.take().is_some_and(|at| at.elapsed() >= LIVE_PAUSE_LIMIT);
+        if long_paused && self.current_is_live() && self.mixer.is_some() && !self.ended {
+            log::info!("a live stream paused a long while starts again where it is now");
+            self.start_current(0.0, Transition::Start, EndReason::Skipped);
+            return;
+        }
         if self.mixer.is_none() || self.ended {
             if self.current.is_none() {
                 self.current = Some(0);
@@ -775,6 +796,9 @@ impl Player {
     }
 
     fn pause(&mut self) {
+        if self.playing {
+            self.paused_at = Some(Instant::now());
+        }
         self.playing = false;
         self.scouting.set_running(false);
         if let Some(out) = &self.out {
@@ -804,6 +828,10 @@ impl Player {
 
     fn seek(&mut self, secs: f64) {
         let Some(index) = self.current else { return };
+        if self.queue[index].item.live {
+            // A live stream plays on from wherever its server is.
+            return;
+        }
         let key = self.queue[index].key;
         let can_seek = self.mixer.as_ref().and_then(|m| m.lane()).is_some_and(|l| l.current().key() == key);
         if !can_seek || self.ended {
@@ -985,7 +1013,8 @@ impl Player {
     // next one as soon as it is known; again whenever either changes. A song
     // with a transition profile from the app is not decoded.
     fn update_scouts(&mut self) {
-        if !self.automix.smart_transitions || self.crossfade_ms == 0 {
+        // A live stream has no end to blend from.
+        if !self.automix.smart_transitions || self.crossfade_ms == 0 || self.current_is_live() {
             self.scouting = Scouting::default();
             return;
         }
@@ -1011,8 +1040,9 @@ impl Player {
         let b_key = next.map(|i| self.queue[i].key).filter(|&k| k != a_key);
         if self.scouting.b_key != b_key {
             self.scouting.b_key = b_key;
-            self.scouting.b_head =
-                next.filter(|&i| b_key.is_some() && self.profile_at(i).is_none()).map(|i| {
+            self.scouting.b_head = next
+                .filter(|&i| b_key.is_some() && self.profile_at(i).is_none() && !self.queue[i].item.live)
+                .map(|i| {
                     let part = SectionPart::Head { secs: HEAD_SECS };
                     let item = &self.queue[i].item;
                     ScoutJob::start(item.source.clone(), self.http_for(i), part, item.bpm)
@@ -1057,6 +1087,12 @@ impl Player {
         let failed = matches!(lane.current().status(), DeckStatus::Failed(_));
         if !failed && lane.current().info().is_none() {
             // Still opening: its length may be known in a moment.
+            return;
+        }
+        // A live stream plays on until it fails or the listener moves on, so
+        // nothing is opened behind it before then.
+        let ended = lane.current().status() == DeckStatus::Ended;
+        if lane.current().is_live() && !failed && !ended {
             return;
         }
         let remaining = self.remaining_secs(current, lane);
@@ -1226,7 +1262,11 @@ impl Player {
     ) -> (TransitionPlan, Option<LiveAnalysis>) {
         let a_len_ms = current_song.duration_ms as i64;
         if !self.automix.smart_transitions {
-            return (TransitionPlan::fixed_crossfade(a_len_ms, blend_ms, "smart transitions off"), None);
+            return (
+                TransitionPlan::fixed_crossfade(a_len_ms, blend_ms, "smart transitions off")
+                    .with_curve(self.automix.fade_curve),
+                None,
+            );
         }
         let (a, b) = (self.queue[current].key, self.queue[next].key);
         let (a_item, b_item) = (&self.queue[current].item, &self.queue[next].item);
@@ -1263,6 +1303,7 @@ impl Player {
                 smart: true,
                 filter_sweeps: self.automix.filter_sweeps,
                 beat_match: self.automix.match_tempo,
+                fade_curve: self.automix.fade_curve,
             },
             context: TransitionContext {
                 now_ms,
@@ -1304,6 +1345,7 @@ impl Player {
         let equal_power = plan.k == 0.0;
         FadeShape {
             k: plan.k,
+            curve: plan.curve,
             filter_strength: plan.filter_strength,
             steps: plan.low_pass_glide().map(|glide| LowPassSteps { beats: plan.beat_progress(), glide }),
             rate: plan.beat_match_rate.filter(|_| room),
@@ -1393,6 +1435,26 @@ impl Player {
             }
             self.crossed = crossed;
             self.heard_frame = self.heard_frame.max(frame);
+        }
+
+        // A live stream's new title, once the sound it starts with is heard.
+        if let Some(key) = self.heard
+            && let Some(lane) = self.mixer.as_ref().and_then(|m| m.lane())
+            && lane.current().key() == key
+            && lane.current().is_live()
+            && let Some(i) = self.index_of(key)
+        {
+            let position = self.shared.position();
+            let item_id = &self.queue[i].item.id;
+            if position.item_id.as_ref() == Some(item_id)
+                && let Some(meta) = lane.current().take_title(position.position_ms / 1_000.0)
+            {
+                self.emit(EngineEvent::StreamTitle {
+                    item_id: item_id.clone(),
+                    title: meta.title,
+                    url: meta.url,
+                });
+            }
         }
 
         // Buffering: playing, but the ring has run dry waiting on a song.

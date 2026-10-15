@@ -1,6 +1,7 @@
 package app.winters.octo.desktop.settings
 
 import app.winters.octo.offline.KeepChoices
+import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StartAfter
 import app.winters.octo.sound.SoundSettings
 import app.winters.octo.desktop.system.SystemPrefs
@@ -9,6 +10,9 @@ import app.winters.octo.desktop.hotkeys.HotkeyPrefs
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.home.HOME_SECTIONS_KEY
 import app.winters.octo.livelists.accountKey
+import app.winters.octo.liveradio.LIVE_RADIUS_DEFAULT_INDEX
+import app.winters.octo.liveradio.LivePlace
+import app.winters.octo.liveradio.LiveSort
 import app.winters.octo.server.serverName
 import app.winters.octo.server.settleServers
 import app.winters.octo.subsonic.AuthMode
@@ -94,6 +98,27 @@ data class AppSettings(
     val deviceId: String = "",
     // Songs kept on this computer to play without a connection.
     val offline: OfflinePrefs = OfflinePrefs(),
+    // Live radio near you: where, how far and in what order, and the
+    // stations kept here.
+    val liveRadio: LiveRadioPrefs = LiveRadioPrefs(),
+    // The newest server release the listener chose Later for, by server id.
+    val serverUpdateLater: Map<String, String> = emptyMap(),
+)
+
+// The Live radio page as the listener left it: what they typed in Where
+// (a postal code, or a city with its state after a comma), the country
+// (an ISO code, empty for this computer's own), the place it was found to
+// be, the radius chosen (by its place in the list of choices) and the
+// order. `kept` is the stations kept on this computer, as KeptStations
+// writes them, so a station saved by a newer Octo never breaks this file.
+@Serializable
+data class LiveRadioPrefs(
+    val where: String = "",
+    val country: String = "",
+    val place: LivePlace? = null,
+    val radius: Int = LIVE_RADIUS_DEFAULT_INDEX,
+    val sort: LiveSort = LiveSort.Distance,
+    val kept: String = "",
 )
 
 // Where kept songs go (empty for the usual folder), and what is kept from
@@ -149,6 +174,8 @@ data class ListeningPrefs(
 data class LyricsPrefs(
     // Whether the online lyrics library (LRCLIB) may be asked, as on the phone.
     val online: Boolean = true,
+    // Fast singing blooms too, as on the phone (LyricsLook.bloomFast).
+    val bloomFast: Boolean = true,
     // How much later than written each song's words are heard, in ms; kept
     // only for songs that were moved.
     val offsets: Map<String, Long> = emptyMap(),
@@ -333,6 +360,9 @@ data class PlaybackPrefs(
     val smartTransitions: Boolean = true,
     val filterSweeps: Boolean = true,
     val matchTempo: Boolean = false,
+    // The shape of the crossfade with smart transitions off; smart
+    // transitions pick their own.
+    val crossfadeCurve: FadeCurve = FadeCurve.EqualPower,
     // The device picked in the output menu, or null to follow the system.
     val outputDevice: String? = null,
     // How fast music plays (0.5 to 2), whether the voice keeps its pitch at

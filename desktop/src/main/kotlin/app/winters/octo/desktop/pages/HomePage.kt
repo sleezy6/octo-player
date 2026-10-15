@@ -69,6 +69,17 @@ import app.winters.octo.subsonic.Playlist
 import app.winters.octo.subsonic.RadioStation
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.launch
+import app.winters.octo.desktop.ui.PlayButton
+import app.winters.octo.desktop.home.octoLists
+import app.winters.octo.home.mixGroup
+import app.winters.octo.desktop.liveradio.FIND_STATIONS_NEAR
+import app.winters.octo.desktop.liveradio.LIVE_RADIO
+import app.winters.octo.desktop.liveradio.ShelfStation
+import app.winters.octo.desktop.liveradio.liveShelf
+import app.winters.octo.desktop.playShelf
+import app.winters.octo.desktop.ui.FindStationsArt
+import app.winters.octo.desktop.ui.StationArt
+import app.winters.octo.desktop.ui.liveStationMenu
 
 // Home: picking up where another device left off, what was played lately,
 // the lists Octo made for the listener and its stations, what came in, what
@@ -83,19 +94,28 @@ fun HomePage(app: AppState, visit: Visit) {
     LaunchedEffect(store) {
         store.refresh()
         app.refreshPlaylistsIfOld()
+        app.liveRadio.checkAdmin()
     }
     val library = app.library?.state?.collectAsState()?.value
     val index = (library as? LibraryState.Ready)?.index
     LaunchedEffect(store, index) { index?.let(store::rediscover) }
     val settings by app.settings.state.collectAsState()
-    val playlists = remember(app.playlists, settings.frame.pinnedPlaylists) { pinnedFirst(yourPlaylists(app.playlists), settings.frame.pinnedPlaylists) }
+    val listener = app.connection?.client?.username.orEmpty()
+    val isOcto = app.connection?.isOcto == true
+    val playlists = remember(app.playlists, settings.frame.pinnedPlaylists, listener, isOcto) {
+        pinnedFirst(yourPlaylists(app.playlists, listener, isOcto), settings.frame.pinnedPlaylists)
+    }
+    // Octo's mixes by group, for the shelves of mixes.
+    val mixes = remember(app.playlists, listener, isOcto) { octoLists(app.playlists, listener, isOcto).toMap() }
     // The server shelves show as the server last gave them until it answers.
     val shelves = store.shelves
     val forYou = shelves.madeForYou
     val stored = settings.appearance.homeSections
     val sections = remember(stored) { homeSectionOrder(stored) }
     // Stations shown again are asked for then.
-    LaunchedEffect(store, sections.shows(HomeSection.Stations)) { store.sectionsChanged() }
+    LaunchedEffect(store, sections.shows(HomeSection.Stations), sections.shows(HomeSection.InternetRadio)) { store.sectionsChanged() }
+    // The Live radio shelf: the server's streams and the stations kept here.
+    val live = remember(shelves.live, settings.liveRadio.kept) { liveShelf(shelves.live, app.liveRadio.kept(settings.liveRadio).stations) }
     val home = store.data
     val failure = store.failure
     val found = store.rediscovered
@@ -138,7 +158,7 @@ fun HomePage(app: AppState, visit: Visit) {
                                         starting = station.id
                                         app.scope.launch {
                                             try {
-                                                app.play(connection.client.playlist(station.id).entry)
+                                                app.playStation(connection.client.playlist(station.id).entry, 0, false, station.id, station.name)
                                             } catch (e: SubsonicException.NotFound) {
                                                 store.stationGone(station.id)
                                                 app.notice = "${station.name} isn't on the server any more."
@@ -152,6 +172,10 @@ fun HomePage(app: AppState, visit: Visit) {
                                 }
                             }
                         }
+                        HomeSection.YearMixes, HomeSection.GenreMixes, HomeSection.ArtistMixes, HomeSection.CountryMixes ->
+                            mixes[entry.section.mixGroup]?.takeIf { it.isNotEmpty() }?.let { lists ->
+                                moving(key = "shelf:${entry.section.id}") { ShelfRow(entry.section.title, lists, { it.id }, null) { PlaylistCard(app, it) } }
+                            }
                         HomeSection.Charts -> app.search?.charts?.let { chartsRow(app, it, store) }
                         HomeSection.RecentlyAdded -> albums(app, entry.section.title, home.recentlyAdded) { app.navigator.go(Page.RecentlyAdded) }
                         HomeSection.MostPlayed ->
@@ -174,6 +198,12 @@ fun HomePage(app: AppState, visit: Visit) {
                         }
                         HomeSection.NeverPlayed -> found?.let {
                             albums(app, AlbumShelf.NeverPlayed.title, it.neverPlayed, whole = it.neverPlayed.size < SHELF_SIZE, seeAll = open(AlbumShelf.NeverPlayed))
+                        }
+                        // Always shown, since it opens with the way to find stations.
+                        HomeSection.InternetRadio -> moving(key = "shelf:live") {
+                            ShelfRow(entry.section.title, listOf<ShelfStation?>(null) + live, { it?.streamUrl ?: "find" }, { app.navigator.go(Page.LiveRadio) }) { station ->
+                                if (station == null) FindStationsCard(app) else LiveShelfCard(app, station, live)
+                            }
                         }
                         // Shelves only the phone draws.
                         HomeSection.Pinned, HomeSection.Artists, HomeSection.SomethingDifferent -> Unit
@@ -241,16 +271,47 @@ private fun PlaylistCard(app: AppState, playlist: Playlist) {
     )
 }
 
-// A station Octo runs: a click plays the songs it has lined up today.
+// A station Octo runs: a click opens the songs it has lined up, and the
+// play button on its cover plays the station, which keeps going.
 @Composable
 private fun StationCard(app: AppState, station: RadioStation, starting: Boolean, onPlay: () -> Unit) {
     MediaCard(
         station.name,
         "Station",
         station.coverArt ?: station.id,
-        onOpen = onPlay,
-        badge = if (starting) ({ Spinner(size = IconSize.Transport) }) else null,
+        onOpen = { app.navigator.go(Page.Playlist(station.id)) },
+        badge = { if (starting) Spinner(size = IconSize.Transport) else PlayButton(playing = false, enabled = true, size = ControlHeight.L, label = "Play ${station.name}", onClick = onPlay) },
         picture = { modifier, shape -> StationPicture(app, station, modifier, shape) },
+    )
+}
+
+// The first card on the Live radio shelf: the way to the Live radio page.
+@Composable
+private fun FindStationsCard(app: AppState) {
+    MediaCard(
+        FIND_STATIONS_NEAR,
+        LIVE_RADIO,
+        null,
+        onOpen = { app.navigator.go(Page.LiveRadio) },
+        picture = { modifier, shape -> FindStationsArt(modifier, shape) },
+    )
+}
+
+// A live station on the shelf: a click or its play button plays it, with
+// the shelf's other stations around it for Back and Next. One kept here has
+// its menu on a right click.
+@Composable
+private fun LiveShelfCard(app: AppState, station: ShelfStation, shelf: List<ShelfStation>) {
+    val kept = station.kept
+    val play = { app.playShelf(station, shelf) }
+    MediaCard(
+        station.name,
+        if (station.serverId != null) "On your server" else "Kept here",
+        null,
+        onOpen = play,
+        onMenu = kept?.let { liveStationMenu(app, it, kept = true, play = play) },
+        badge = { PlayButton(playing = false, enabled = true, size = ControlHeight.L, label = "Play ${station.name}", onClick = play) },
+        picture = { modifier, shape -> StationArt(app, station.logo, station.name, station.streamUrl, modifier, shape, station.coverArt) },
     )
 }
 

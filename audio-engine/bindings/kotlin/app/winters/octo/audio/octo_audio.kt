@@ -3420,6 +3420,11 @@ data class AutomixSettings (
      * crossfade length.
      */
     val `maxOverlapMs`: kotlin.UInt
+    , 
+    /**
+     * The shape of the fixed crossfade, with smart transitions off.
+     */
+    val `fadeCurve`: FadeCurve
     
 ){
     
@@ -3440,6 +3445,7 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterTypeFadeCurve.read(buf),
         )
     }
 
@@ -3447,7 +3453,8 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
             FfiConverterBoolean.allocationSize(value.`smartTransitions`) +
             FfiConverterBoolean.allocationSize(value.`filterSweeps`) +
             FfiConverterBoolean.allocationSize(value.`matchTempo`) +
-            FfiConverterUInt.allocationSize(value.`maxOverlapMs`)
+            FfiConverterUInt.allocationSize(value.`maxOverlapMs`) +
+            FfiConverterTypeFadeCurve.allocationSize(value.`fadeCurve`)
     )
 
     override fun write(value: AutomixSettings, buf: ByteBuffer) {
@@ -3455,13 +3462,68 @@ public object FfiConverterTypeAutomixSettings: FfiConverterRustBuffer<AutomixSet
             FfiConverterBoolean.write(value.`filterSweeps`, buf)
             FfiConverterBoolean.write(value.`matchTempo`, buf)
             FfiConverterUInt.write(value.`maxOverlapMs`, buf)
+            FfiConverterTypeFadeCurve.write(value.`fadeCurve`, buf)
     }
 }
 
 
 
 /**
- * The rest of the shaping: the limiter, balance and mono.
+ * Headphone crossfeed: each ear hears a little of the other side.
+ */
+data class CrossfeedSettings (
+    val `on`: kotlin.Boolean
+    , 
+    /**
+     * Where the sound fed to the other ear has fallen by 3 dB, 300 to
+     * 2000 Hz.
+     */
+    val `cutHz`: kotlin.Float
+    , 
+    /**
+     * How much quieter than the ear's own sound the other side is in the
+     * bass, 1 to 15 dB.
+     */
+    val `feedDb`: kotlin.Float
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeCrossfeedSettings: FfiConverterRustBuffer<CrossfeedSettings> {
+    override fun read(buf: ByteBuffer): CrossfeedSettings {
+        return CrossfeedSettings(
+            FfiConverterBoolean.read(buf),
+            FfiConverterFloat.read(buf),
+            FfiConverterFloat.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: CrossfeedSettings) = (
+            FfiConverterBoolean.allocationSize(value.`on`) +
+            FfiConverterFloat.allocationSize(value.`cutHz`) +
+            FfiConverterFloat.allocationSize(value.`feedDb`)
+    )
+
+    override fun write(value: CrossfeedSettings, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`on`, buf)
+            FfiConverterFloat.write(value.`cutHz`, buf)
+            FfiConverterFloat.write(value.`feedDb`, buf)
+    }
+}
+
+
+
+/**
+ * The rest of the shaping: crossfeed, the limiter, balance and mono.
  */
 data class DspSettings (
     /**
@@ -3475,6 +3537,8 @@ data class DspSettings (
     val `balance`: kotlin.Float
     , 
     val `mono`: kotlin.Boolean
+    , 
+    val `crossfeed`: CrossfeedSettings
     
 ){
     
@@ -3494,19 +3558,22 @@ public object FfiConverterTypeDspSettings: FfiConverterRustBuffer<DspSettings> {
             FfiConverterBoolean.read(buf),
             FfiConverterFloat.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterTypeCrossfeedSettings.read(buf),
         )
     }
 
     override fun allocationSize(value: DspSettings) = (
             FfiConverterBoolean.allocationSize(value.`limiter`) +
             FfiConverterFloat.allocationSize(value.`balance`) +
-            FfiConverterBoolean.allocationSize(value.`mono`)
+            FfiConverterBoolean.allocationSize(value.`mono`) +
+            FfiConverterTypeCrossfeedSettings.allocationSize(value.`crossfeed`)
     )
 
     override fun write(value: DspSettings, buf: ByteBuffer) {
             FfiConverterBoolean.write(value.`limiter`, buf)
             FfiConverterFloat.write(value.`balance`, buf)
             FfiConverterBoolean.write(value.`mono`, buf)
+            FfiConverterTypeCrossfeedSettings.write(value.`crossfeed`, buf)
     }
 }
 
@@ -3999,7 +4066,8 @@ data class QueueItem (
     val `id`: kotlin.String
     , 
     /**
-     * A file path, a `file://` address, or a signed HTTP(S) stream address.
+     * A file path, a `file://` address, a signed HTTP(S) stream address,
+     * or an HLS playlist's address.
      */
     val `source`: kotlin.String
     , 
@@ -4036,6 +4104,19 @@ data class QueueItem (
      * it runs at double or half time.
      */
     val `bpm`: kotlin.Double? = null 
+    , 
+    /**
+     * A live stream, such as live radio: it has no length and cannot be
+     * sought, a dropped connection is made again, and its titles arrive as
+     * `StreamTitle` events.
+     */
+    val `live`: kotlin.Boolean = false 
+    , 
+    /**
+     * The source is an HLS playlist even though its address and its
+     * server's content type do not say so.
+     */
+    val `hls`: kotlin.Boolean = false 
     
 ){
     
@@ -4061,6 +4142,8 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterSequenceTypeHttpHeader.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalDouble.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -4073,7 +4156,9 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterOptionalTypeReplayGainInfo.allocationSize(value.`replayGain`) +
             FfiConverterSequenceTypeHttpHeader.allocationSize(value.`headers`) +
             FfiConverterOptionalString.allocationSize(value.`genre`) +
-            FfiConverterOptionalDouble.allocationSize(value.`bpm`)
+            FfiConverterOptionalDouble.allocationSize(value.`bpm`) +
+            FfiConverterBoolean.allocationSize(value.`live`) +
+            FfiConverterBoolean.allocationSize(value.`hls`)
     )
 
     override fun write(value: QueueItem, buf: ByteBuffer) {
@@ -4086,6 +4171,8 @@ public object FfiConverterTypeQueueItem: FfiConverterRustBuffer<QueueItem> {
             FfiConverterSequenceTypeHttpHeader.write(value.`headers`, buf)
             FfiConverterOptionalString.write(value.`genre`, buf)
             FfiConverterOptionalDouble.write(value.`bpm`, buf)
+            FfiConverterBoolean.write(value.`live`, buf)
+            FfiConverterBoolean.write(value.`hls`, buf)
     }
 }
 
@@ -4825,6 +4912,24 @@ sealed class EngineEvent {
     }
     
     /**
+     * A live stream's title changed, as it is heard: usually "Artist -
+     * Song" for what the station plays now, as the station sent it. An
+     * empty title says the stream no longer names what it plays. `url` is
+     * the address sent with it (`StreamArtwork`, else `StreamUrl`), empty
+     * when there is none.
+     */
+    data class StreamTitle(
+        val `itemId`: kotlin.String, 
+        val `title`: kotlin.String, 
+        val `url`: kotlin.String) : EngineEvent()
+        
+    {
+        
+
+        companion object
+    }
+    
+    /**
      * How the next song will follow the playing one, decided ahead of
      * time. `start_ms` is when in `from_id` the blend starts (its length
      * for a gapless join), `entry_ms` where `to_id` comes in, and
@@ -4902,7 +5007,12 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 FfiConverterString.read(buf),
                 FfiConverterDouble.read(buf),
                 )
-            12 -> EngineEvent.TransitionPlanned(
+            12 -> EngineEvent.StreamTitle(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            13 -> EngineEvent.TransitionPlanned(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterULong.read(buf),
@@ -5001,6 +5111,15 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 + FfiConverterDouble.allocationSize(value.`positionMs`)
             )
         }
+        is EngineEvent.StreamTitle -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`itemId`)
+                + FfiConverterString.allocationSize(value.`title`)
+                + FfiConverterString.allocationSize(value.`url`)
+            )
+        }
         is EngineEvent.TransitionPlanned -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -5081,8 +5200,15 @@ public object FfiConverterTypeEngineEvent : FfiConverterRustBuffer<EngineEvent>{
                 FfiConverterDouble.write(value.`positionMs`, buf)
                 Unit
             }
-            is EngineEvent.TransitionPlanned -> {
+            is EngineEvent.StreamTitle -> {
                 buf.putInt(12)
+                FfiConverterString.write(value.`itemId`, buf)
+                FfiConverterString.write(value.`title`, buf)
+                FfiConverterString.write(value.`url`, buf)
+                Unit
+            }
+            is EngineEvent.TransitionPlanned -> {
+                buf.putInt(13)
                 FfiConverterString.write(value.`fromId`, buf)
                 FfiConverterString.write(value.`toId`, buf)
                 FfiConverterULong.write(value.`startMs`, buf)
@@ -5192,6 +5318,62 @@ public object FfiConverterTypeErrorKind: FfiConverterRustBuffer<ErrorKind> {
     override fun allocationSize(value: ErrorKind) = 4UL
 
     override fun write(value: ErrorKind, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * The shape of the fixed crossfade: how the outgoing song's volume falls
+ * and the incoming song's rises as the blend goes from 0 to 1.
+ */
+
+enum class FadeCurve {
+    
+    /**
+     * cos and sin: the two songs together keep a steady loudness.
+     */
+    EQUAL_POWER,
+    /**
+     * Straight lines, with a slight dip in the middle.
+     */
+    LINEAR,
+    /**
+     * Holds each song longer, then swaps them quickly around the middle.
+     */
+    S_CURVE,
+    /**
+     * The same step down in decibels every moment, to -60 dB, then silence.
+     */
+    EVEN_LOUDNESS,
+    /**
+     * Both songs play at full volume; only the edges fade.
+     */
+    MIX_ONLY;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFadeCurve: FfiConverterRustBuffer<FadeCurve> {
+    override fun read(buf: ByteBuffer) = try {
+        FadeCurve.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: FadeCurve) = 4UL
+
+    override fun write(value: FadeCurve, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }

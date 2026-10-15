@@ -21,8 +21,8 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | `src/decode.rs` | symphonia decoding, gapless trims, seeking, tags |
 | `src/opus.rs` | Opus through a pure Rust decoder |
 | `src/motion.rs` | Animated covers: H.264 in fragmented MP4, decoded by OpenH264 and handed out picture by picture in a loop |
-| `src/source/` | Files, and HTTP(S) streams with read-ahead and pinned certificates |
-| `src/sound/` | EQ, presets, limiter, balance, mono, ReplayGain |
+| `src/source/` | Files, HTTP(S) streams with read-ahead and pinned certificates, live streams with ICY titles, HLS |
+| `src/sound/` | EQ, presets, crossfeed, limiter, balance, mono, ReplayGain |
 | `src/pace.rs` | Speed (pitch kept) and pitch shift |
 | `src/output/` | Device callback, audio clock, cpal and silent drivers |
 | `src/timeline.rs` | Which song and second each ring frame holds |
@@ -79,6 +79,7 @@ same sound shaping as the Android app, and a sample-accurate clock.
 | Pause and resume | 10 ms fade |
 | Per-output profiles | The app keeps them: it gets `DeviceChanged` and calls `set_eq` and `set_dsp` |
 | Trusted self-signed certificates | `set_trusted_certificates`: the system's check first, then a SHA-256 pin for that host only |
+| Live streams | Live radio (`live` items): reconnects, ICY titles as `StreamTitle`, old SHOUTcast `ICY 200 OK` servers, HLS with MPEG-TS, AAC, MP3 or fMP4 segments |
 | Skip silence | Not ported |
 
 <!-- markdownlint-enable MD013 -->
@@ -177,12 +178,58 @@ engine.position().positionMs          // audio clock, fractional ms
   `GaplessTransition`, `CrossfadeStarted`, `TransitionPlanned` (how the
   next song will follow, with an `automix:` line for the log), `Buffering`, `Ready`,
   `StateChanged`, `QueueEnded`, `Error` (with a kind), `DeviceChanged`
-  (with the device's format), `Position`. `TrackStarted` carries the song's
-  own format as decoded (codec, lossless, rate, channels, bits).
+  (with the device's format), `Position`, `StreamTitle` (a live stream's
+  title, as it is heard). `TrackStarted` carries the song's own format as
+  decoded (codec, lossless, rate, channels, bits).
 
 Server streams arrive as signed addresses from the app, as on Android, with
 optional extra headers per item. The engine reuses the address for range
 requests and reconnects.
+
+## Live streams
+
+A `QueueItem` with `live = true` is live radio. It has no length and
+ignores seeks and start positions, and nothing is opened behind it until
+it fails or the listener moves on. Paused for 30 s or more, it starts again
+where its station is now. `hls = true` opens an address as HLS whatever it
+looks like.
+
+- **HTTP.** Requests carry `Icy-MetaData: 1` and no range. A dropped or
+  ended connection is made again after 1, 2, 4 and 8 s, carrying on from
+  wherever the server is; then the stream fails as gone. A connection
+  counts as working only after 64 KB or 10 s, so a server that hangs up
+  after a few bytes each time is gone too. The metadata
+  blocks an `icy-metaint` server puts in the audio are taken out, and each
+  new `StreamTitle` is sent as an event once the sound it starts with is
+  heard; an empty one says the station names nothing now. Old SHOUTcast servers answer `ICY 200 OK`; a link in the client's
+  connection chain reads that as `HTTP/1.0 200 OK`.
+- **Types.** `audio/aac`, `audio/aacp` and `audio/x-aac` are ADTS AAC,
+  `audio/mpeg` MP3 and `audio/ogg` Ogg; the bytes have the last word. A
+  codec that starts over (a new Ogg stream, say) gets a new decoder, and
+  one that comes back at another sample rate is changed back to the first.
+- **HLS.** An `.m3u8` address, or a playlist content type, opens as HLS.
+  A master playlist's best variant the engine decodes is played (sound
+  only first, then the highest bit rate). Segments are fetched in order
+  and joined; a live playlist is fetched again every target duration,
+  starting three segments from the newest. Numbers that start again (an
+  encoder restart) are joined again at the newest; a playlist that adds
+  nothing for three target durations (at least 20 s) fails, as do eight
+  segments in a row the server says are missing. Empty segments are passed
+  over. MPEG-TS, ADTS AAC, MP3 and
+  fragmented MP4 (init segment, then segments) play; a discontinuity or a
+  new init segment opens a fresh decoder. MPEG-TS is cut down to its first
+  audio stream (AAC in ADTS, or MPEG audio) by `source/ts.rs`, which keeps
+  its place across segments, so a packet cut between two joins up; timed
+  ID3 and other streams are passed over. Encrypted streams are refused
+  with a clear error. A live answer whose first bytes (after a byte order
+  mark and white space) are `#EXTM3U` is a playlist whatever its address
+  and type say; one with no target duration or variants, such as a
+  station's `#EXTINF:-1` list, opens its first entry, following at most
+  three playlists in a row.
+- **HE-AAC.** symphonia's AAC decoder has no SBR or PS, so HE-AAC plays its
+  AAC-LC core: half the sample rate, no rebuilt high band, and for HE-AAC
+  v2 its mono core. In ADTS that happens by itself; an MP4 config that
+  names SBR or PS is turned into its core's.
 
 ## Transitions
 
@@ -228,7 +275,9 @@ ID3 support.
 
 `cargo test` needs no sound device: engine tests play through the silent
 driver. WAV and FLAC files are made while the tests run; the MP3 and Opus
-fixtures are tones made by `tools/make-fixtures`.
+fixtures are tones made by `tools/make-fixtures`, the AAC ones by FFmpeg
+(see `tests/fixtures/README.md`). Live streams and HLS play from servers
+the tests run on the spot.
 
 ## Performance
 

@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -64,6 +65,7 @@ import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.playback.NowPlaying
+import app.winters.octo.player.LiveStopIcon
 import app.winters.octo.player.fractionAt
 import app.winters.octo.player.rememberPositionMs
 import app.winters.octo.ui.common.Artwork
@@ -121,6 +123,8 @@ fun BottomBar(
     modifier: Modifier = Modifier,
     // The glass's film, which can carry a trace of the song's colour.
     film: Color = GlazeTint,
+    // The tabs carrying a small dot, by index, each with what it means.
+    marks: Map<Int, String> = emptyMap(),
 ) {
     val grown by animateFloatAsState(if (playerShown) 1f else 0f, spring(0.75f, 200f), label = "bar shape")
     val position = rememberPositionMs(now, positionMs)
@@ -137,7 +141,7 @@ fun BottomBar(
     ) {
         val fullTabs = maxWidth - BarHeight - Gap
         val tabsWidth = lerp(fullTabs, BarHeight, grown)
-        TabBar(haze, selected, grown, playerShown, fullTabs, Modifier.width(tabsWidth), actions, film)
+        TabBar(haze, selected, grown, playerShown, fullTabs, Modifier.width(tabsWidth), actions, film, marks)
         FloatingGlaze(
             haze,
             Modifier
@@ -194,6 +198,7 @@ private fun TabBar(
     modifier: Modifier,
     actions: BarActions,
     film: Color,
+    marks: Map<Int, String>,
 ) {
     FloatingGlaze(
         haze,
@@ -252,6 +257,8 @@ private fun TabBar(
                             // hid both copies of the icon for that moment.
                             showIcon = folded <= 0f || index != selected,
                             enabled = !isFolded,
+                            // On the tab in front, its page shows what waits instead.
+                            mark = marks[index]?.takeIf { index != selected },
                             modifier = Modifier.weight(1f),
                         ) { actions.onSelect(index) }
                     }
@@ -280,6 +287,7 @@ private fun TabButton(
     selected: Boolean,
     showIcon: Boolean,
     enabled: Boolean,
+    mark: String?,
     modifier: Modifier,
     onClick: () -> Unit,
 ) {
@@ -300,12 +308,25 @@ private fun TabButton(
             ),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            painterResource(if (selected) tab.selectedIcon else tab.icon),
-            contentDescription = stringResource(tab.label),
-            tint = tint,
-            modifier = Modifier.size(TabIconSize).alpha(if (showIcon) 1f else 0f),
-        )
+        val label = stringResource(tab.label)
+        Box(Modifier.size(TabIconSize).alpha(if (showIcon) 1f else 0f)) {
+            Icon(
+                painterResource(if (selected) tab.selectedIcon else tab.icon),
+                contentDescription = if (mark != null) "$label, $mark" else label,
+                tint = tint,
+                modifier = Modifier.matchParentSize(),
+            )
+            // A small dot on the icon's corner while something waits there.
+            if (mark != null) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 3.dp, y = (-2).dp)
+                        .size(7.dp)
+                        .background(OctoColors.Accent, CircleShape),
+                )
+            }
+        }
     }
 }
 
@@ -360,28 +381,44 @@ private fun PlayerCapsule(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            CapsuleButton(OctoIcons.Previous, "Previous", actions.onPrevious)
-            CapsuleButton(if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play, if (now.isPlaying) "Pause" else "Play", actions.onPlayPause)
-            CapsuleButton(OctoIcons.Next, "Next", actions.onNext)
+            val live = now.live
+            if (live == null) {
+                CapsuleButton(OctoIcons.Previous, "Previous", actions.onPrevious)
+                CapsuleButton(if (now.isPlaying) OctoIcons.Pause else OctoIcons.Play, if (now.isPlaying) "Pause" else "Play", actions.onPlayPause)
+                CapsuleButton(OctoIcons.Next, "Next", actions.onNext)
+            } else {
+                // A station stops rather than pauses; Back and Next change
+                // station, while there is more than one to change to.
+                val lineup = live.lineup
+                if (lineup.shows) CapsuleButton(OctoIcons.Previous, "Previous station", actions.onPrevious, enabled = lineup.hasPrevious)
+                CapsuleButton(if (now.playWhenReady) LiveStopIcon else OctoIcons.Play, if (now.playWhenReady) "Stop" else "Play", actions.onPlayPause)
+                if (lineup.shows) CapsuleButton(OctoIcons.Next, "Next station", actions.onNext, enabled = lineup.hasNext)
+            }
         }
     }
 }
 
 @Composable
-private fun CapsuleButton(@DrawableRes icon: Int, description: String, onClick: () -> Unit) {
+private fun CapsuleButton(@DrawableRes icon: Int, description: String, onClick: () -> Unit, enabled: Boolean = true) {
     Box(
         Modifier
             .size(36.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
+                enabled = enabled,
                 role = Role.Button,
                 onClick = onClick,
             )
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(icon), contentDescription = null, tint = OctoColors.TextPrimary, modifier = Modifier.size(28.dp))
+        Icon(
+            painterResource(icon),
+            contentDescription = null,
+            tint = if (enabled) OctoColors.TextPrimary else OctoColors.TextPrimary.copy(alpha = 0.3f),
+            modifier = Modifier.size(28.dp),
+        )
     }
 }
 

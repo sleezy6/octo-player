@@ -20,6 +20,11 @@ import kotlinx.serialization.Serializable
 @Serializable data class OnlineAlbumRoute(val id: String) : NavKey
 @Serializable data class OnlineArtistRoute(val id: String) : NavKey
 
+// A list the server makes (a station, a Made for you list), by its id, with
+// the name and cover it was shown with. A station (`radio`) keeps going once
+// played; a list ends with its songs.
+@Serializable data class ServerListRoute(val id: String, val name: String, val artwork: String?, val radio: Boolean = false) : NavKey
+
 @Serializable data object AlbumsRoute : NavKey
 @Serializable data object ArtistsRoute : NavKey
 @Serializable data object SongsRoute : NavKey
@@ -89,6 +94,9 @@ enum class ServerForm {
 // The server's shared links, and its internet radio stations.
 @Serializable data object SharesRoute : NavKey
 @Serializable data object RadioStationsRoute : NavKey
+
+// Live radio stations around a place, from the Radio Browser catalog.
+@Serializable data object LiveRadioNearRoute : NavKey
 
 // The equalizer and everything else that shapes the sound.
 @Serializable data object SoundRoute : NavKey

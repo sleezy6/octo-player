@@ -3,6 +3,7 @@ package app.winters.octo.playback
 import android.content.ComponentName
 import android.content.Context
 import android.media.AudioManager
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.media3.common.DeviceInfo
 import androidx.media3.common.MediaItem
@@ -39,6 +40,10 @@ data class NowPlaying(
     val deviceVolume: Float? = null,
     // Marked explicit, for the "E" by its title.
     val explicit: Boolean = false,
+    // Meant to play: true while it plays, and while it connects or buffers.
+    val playWhenReady: Boolean = false,
+    // A live station on now, with what it has on air.
+    val live: LiveNow? = null,
 )
 
 // The app's line to the playback service. Screens ask it to play things and
@@ -139,9 +144,19 @@ class PlaybackConnection @Inject constructor(
 
     // Plays a list of songs, starting at one of them, or shuffled.
     // `source` names the list for the queue's headings ("OK Computer").
-    fun playTracks(trackIds: List<String>, startIndex: Int = 0, shuffle: Boolean = false, source: String? = null) {
+    fun playTracks(trackIds: List<String>, startIndex: Int = 0, shuffle: Boolean = false, source: String? = null) =
+        play(trackIds, startIndex, shuffle, QueueSource.Played(source).encoded())
+
+    // Plays a station's songs from one of them, under its name; as they run
+    // low, more of its kind are added. Shuffled, its songs are put in a new
+    // order, so the songs added later still come after them.
+    fun playStation(trackIds: List<String>, startIndex: Int, id: String, name: String, shuffle: Boolean = false) {
+        val ids = if (shuffle) trackIds.shuffled() else trackIds
+        play(ids, if (shuffle) 0 else startIndex, false, QueueSource.Station(id, name).encoded())
+    }
+
+    private fun play(trackIds: List<String>, startIndex: Int, shuffle: Boolean, word: String) {
         if (trackIds.isEmpty()) return
-        val word = QueueSource.Played(source).encoded()
         withController { c ->
             val items = trackIds.map { songRequest(it, word) }
             c.shuffleModeEnabled = shuffle
@@ -167,11 +182,18 @@ class PlaybackConnection @Inject constructor(
         scope.launch { playTracks(catalog.albumTrackIds(albumId), 0, shuffle, catalog.album(albumId).first()?.title) }
     }
 
-    // With nothing queued, the play button shuffles the whole library.
+    // Plays the stations a list holds, in its order, from the one tapped:
+    // Back and Next go through them.
+    fun playLineup(stationIds: List<String>, startIndex: Int, source: String? = null) =
+        playTracks(stationIds, startIndex.coerceIn(0, (stationIds.size - 1).coerceAtLeast(0)), source = source)
+
+    // With nothing queued, the play button shuffles the whole library. A
+    // station that is connecting counts as playing, so the button stops it.
     fun togglePlayPause() = withController { c ->
         when {
             c.mediaItemCount == 0 -> scope.launch { playTracks(catalog.allTrackIds(), shuffle = true) }
             c.isPlaying -> c.pause()
+            c.playWhenReady && c.currentMediaItem?.mediaId?.let(::isRadio) == true -> c.pause()
             else -> {
                 if (c.playbackState == Player.STATE_IDLE) c.prepare()
                 c.play()
@@ -270,9 +292,16 @@ class PlaybackConnection @Inject constructor(
         }
     }
 
+    private val liveClock = LiveClock(SystemClock::elapsedRealtime)
+
     private fun publish(player: Player) {
         val item: MediaItem? = player.currentMediaItem
         val meta = item?.mediaMetadata
+        val station = item?.takeIf { isRadio(it.mediaId) }
+        val since = liveClock.heard(station?.let { it.entryId ?: it.mediaId }, player.isPlaying, player.playWhenReady)
+        val live = station?.let {
+            liveNowOf(it.mediaId, meta?.icyRead(), List(player.mediaItemCount) { i -> player.getMediaItemAt(i).mediaId }, player.currentMediaItemIndex, since)
+        }
         _now.value = NowPlaying(
             trackId = item?.mediaId,
             title = meta?.title?.toString(),
@@ -290,6 +319,8 @@ class PlaybackConnection @Inject constructor(
             casting = player.deviceInfo.playbackType == DeviceInfo.PLAYBACK_TYPE_REMOTE,
             deviceVolume = deviceVolumeOf(player),
             explicit = meta?.isExplicit() == true,
+            playWhenReady = player.playWhenReady,
+            live = live,
         )
     }
 

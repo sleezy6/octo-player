@@ -96,6 +96,7 @@ import app.winters.octo.ui.menu.SongMenuState
 import app.winters.octo.ui.offline.DownloadsScreen
 import app.winters.octo.ui.online.OnlineAlbumScreen
 import app.winters.octo.ui.online.OnlineArtistScreen
+import app.winters.octo.ui.online.ServerListScreen
 import app.winters.octo.ui.playlist.LocalPlaylistSheets
 import app.winters.octo.ui.playlist.PlaylistScreen
 import app.winters.octo.ui.playlist.PlaylistSheets
@@ -104,6 +105,7 @@ import app.winters.octo.ui.livelists.LiveListEditScreen
 import app.winters.octo.ui.livelists.LiveListScreen
 import app.winters.octo.ui.playlist.PlaylistsScreen
 import app.winters.octo.ui.search.SearchScreen
+import app.winters.octo.ui.search.SearchShellViewModel
 import app.winters.octo.ui.server.LocalShareSheet
 import app.winters.octo.ui.server.RadioStationsScreen
 import app.winters.octo.ui.server.ShareSheetHost
@@ -114,6 +116,8 @@ import app.winters.octo.ui.settings.DisconnectSheetHost
 import app.winters.octo.ui.settings.LocalDisconnectPrompt
 import app.winters.octo.ui.settings.SettingsPageScreen
 import app.winters.octo.ui.settings.SettingsScreen
+import app.winters.octo.ui.settings.SERVER_UPDATE_MARK
+import app.winters.octo.ui.settings.rememberServerUpdateDot
 import app.winters.octo.ui.signin.SignInScreen
 import app.winters.octo.ui.sound.SoundScreen
 import dev.chrisbanes.haze.hazeSource
@@ -192,6 +196,21 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     // The bar's small player, and the full one over everything.
     var barPlayer by rememberSaveable { mutableStateOf(false) }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
+    // A search asked for elsewhere (the live player's "Find this song in
+    // Octo"): the Search tab, at its top, with the player closed.
+    val searchAsks = hiltViewModel<SearchShellViewModel>().asks
+    val searchAsked by searchAsks.asked.collectAsStateWithLifecycle()
+    val searchSeen = rememberSaveable { intArrayOf(searchAsked) }
+    LaunchedEffect(searchAsked) {
+        if (searchAsked == searchSeen[0]) return@LaunchedEffect
+        searchSeen[0] = searchAsked
+        playerOpen = false
+        barPlayer = false
+        val searchTab = 1
+        selected = searchTab
+        val tab = stacks[searchTab]
+        while (tab.size > 1) tab.removeAt(tab.lastIndex)
+    }
     // When the queue empties, both fold away.
     LaunchedEffect(hasTrack) {
         if (!hasTrack) {
@@ -227,6 +246,9 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         library.refresh()
         onPauseOrDispose { }
     }
+
+    // A newer Octo for the server, marked on the Settings tab.
+    val serverUpdateWaits = rememberServerUpdateDot()
 
     val songMenu = remember { SongMenuState() }
     val playlistSheets = remember { PlaylistSheets() }
@@ -303,6 +325,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                         artModifier = Modifier.sharedElement(rememberSharedContentState(ArtKey), this),
                         artShape = RoundedCornerShape(percent = corner),
                         film = barFilm.value,
+                        marks = if (serverUpdateWaits) mapOf(stacks.lastIndex to SERVER_UPDATE_MARK) else emptyMap(),
                     )
                 }
                 // Songs on their way: a small pill above the bar, on the
@@ -372,6 +395,7 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<ArtistRoute> { ArtistScreen(it.id, open, back) }
         entry<OnlineAlbumRoute> { OnlineAlbumScreen(it.id, open, back) }
         entry<OnlineArtistRoute> { OnlineArtistScreen(it.id, open, back) }
+        entry<ServerListRoute> { ServerListScreen(it, back) }
         entry<AlbumsRoute> { AlbumsScreen(open, back) }
         entry<ArtistsRoute> { ArtistsScreen(open, back) }
         entry<SongsRoute> { SongsScreen(back, open) }
@@ -403,7 +427,8 @@ private fun pagesFor(stack: NavBackStack<NavKey>): (NavKey) -> NavEntry<NavKey> 
         entry<SoundRoute> { SoundScreen(back) }
         entry<HomeSectionsRoute> { app.winters.octo.ui.settings.HomeSectionsPage(back) }
         entry<SharesRoute> { SharesScreen(back) }
-        entry<RadioStationsRoute> { RadioStationsScreen(back) }
+        entry<RadioStationsRoute> { RadioStationsScreen(back, open) }
+        entry<LiveRadioNearRoute> { app.winters.octo.ui.liveradio.LiveRadioScreen(back) }
         entry<HistoryRoute> { HistoryScreen(it.mostPlayed, back) }
         entry<LibraryHealthRoute> { LibraryHealthScreen(open, back) }
         entry<HealthCheckRoute> { HealthCheckScreen(it.check, back) }

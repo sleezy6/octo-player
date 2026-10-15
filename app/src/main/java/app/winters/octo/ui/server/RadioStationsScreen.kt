@@ -40,6 +40,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.navigation3.runtime.NavKey
 import app.winters.octo.data.userMessage
 import app.winters.octo.design.AccentButton
 import app.winters.octo.design.GlassInput
@@ -50,7 +51,8 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.design.OctoType
 import app.winters.octo.discovery.Discovery
 import app.winters.octo.playback.PlaybackConnection
-import app.winters.octo.playback.radioId
+import app.winters.octo.liveradio.lineupOf
+import app.winters.octo.liveradio.radioId
 import app.winters.octo.server.ServerControls
 import app.winters.octo.subsonic.RadioStationDetails
 import app.winters.octo.subsonic.SubsonicException
@@ -61,6 +63,8 @@ import app.winters.octo.ui.common.LocalHaze
 import app.winters.octo.ui.common.rememberLast
 import app.winters.octo.ui.common.ScreenTitle
 import app.winters.octo.ui.common.screenPadding
+import app.winters.octo.ui.liveradio.FindNearRow
+import app.winters.octo.ui.nav.LiveRadioNearRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -177,10 +181,15 @@ class RadioStationsViewModel @Inject constructor(
 
     // A station the server made plays the songs it has lined up, like the
     // Home shelf; any other plays its stream.
+    // A stream plays with the list's other streams in its order, for Back
+    // and Next.
     fun play(station: RadioStationDetails) {
         if (starting != null) return
         if (station.id !in readOnly.value) {
-            if (station.streamUrl.isNotBlank()) playback.playTracks(listOf(radioId(station.streamUrl, station.name)))
+            if (station.streamUrl.isBlank()) return
+            val streams = (stations as? LoadState.Ready)?.data.orEmpty().filter { it.id !in readOnly.value && it.streamUrl.isNotBlank() }
+            val (ids, start) = lineupOf(streams, streams.indexOfFirst { it.id == station.id }.coerceAtLeast(0), { it.streamUrl }, { it.radioId() })
+            playback.playLineup(ids.ifEmpty { listOf(station.radioId()) }, start, source = "Radio stations")
             return
         }
         starting = station.id
@@ -190,7 +199,7 @@ class RadioStationsViewModel @Inject constructor(
                 if (songs.isNotEmpty()) {
                     playback.playTracks(songs.map { it.id })
                 } else if (station.streamUrl.isNotBlank()) {
-                    playback.playTracks(listOf(radioId(station.streamUrl, station.name)))
+                    playback.playTracks(listOf(station.radioId()))
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -208,13 +217,15 @@ class RadioStationsViewModel @Inject constructor(
 
 // The server's internet radio stations. Tapping one plays it. An admin can
 // add stations and change or delete them, except ones the server keeps.
+// Above them is the way to live stations near the listener.
 @Composable
-fun RadioStationsScreen(onBack: () -> Unit, vm: RadioStationsViewModel = hiltViewModel()) {
+fun RadioStationsScreen(onBack: () -> Unit, onOpen: (NavKey) -> Unit, vm: RadioStationsViewModel = hiltViewModel()) {
     val admin by vm.admin.collectAsStateWithLifecycle()
     val readOnly by vm.readOnly.collectAsStateWithLifecycle()
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = screenPadding(extraTop = DetailTopGap)) {
             item(key = "title") { ScreenTitle("Radio stations") }
+            item(key = "near") { FindNearRow(onClick = { onOpen(LiveRadioNearRoute) }, modifier = Modifier.padding(bottom = 8.dp)) }
             if (admin) {
                 item(key = "add") {
                     GlazeButton("Add station", onClick = vm::add, modifier = Modifier.padding(start = 20.dp, bottom = 8.dp))

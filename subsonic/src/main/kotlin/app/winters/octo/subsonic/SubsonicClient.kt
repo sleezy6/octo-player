@@ -211,8 +211,8 @@ class SubsonicClient(
     suspend fun upgrades(): List<Upgrade> =
         get("getUpgrades", key = "upgrades", serializer = ListSerializer(Upgrade.serializer()), default = emptyList())
 
-    // The signed-in user's Spotify import: sign-in, lists and trickle. Only for
-    // servers that list octoImports.
+    // The signed-in user's imports: lists and trickle. Only for servers that
+    // list octoImports.
     suspend fun imports(): ImportOverview =
         get("getImports", key = "imports", serializer = ImportOverview.serializer(), default = ImportOverview())
 
@@ -441,6 +441,17 @@ class SubsonicClient(
             SongList.serializer(),
             SongList(),
         ).song
+
+    // A station's next songs on Octo (octoStations): up to `count`, none of
+    // the ones in `after` (the station's songs already queued).
+    suspend fun stationSongs(id: String, count: Int, after: List<String>): List<Song> =
+        getWith(
+            "getStationSongs",
+            listOf("id" to id, "count" to "$count") + after.map { "after" to it },
+            "stationSongs",
+            StationSongs.serializer(),
+            StationSongs(),
+        ).entry
 
     // Streams the server runs. On Octo each is also a read-only playlist
     // with the same id, holding the songs it will play.
@@ -800,6 +811,24 @@ class SubsonicClient(
         send("updateInternetRadioStation", listOf("id" to id) + stationParams(streamUrl, name, homepageUrl))
 
     suspend fun deleteRadioStation(id: String) = send("deleteInternetRadioStation", listOf("id" to id))
+
+    // Where a postal code (`code`) or a city (`name`, with `state` when
+    // known) is in `country` (ISO alpha-2), or, with neither, the nearest
+    // place to a position (`latitude`, `longitude`), on a server that lists
+    // octoPlaces; null when the server does not know the place.
+    suspend fun place(
+        code: String?,
+        name: String?,
+        state: String?,
+        country: String,
+        latitude: Double? = null,
+        longitude: Double? = null,
+    ): Place? =
+        try {
+            getOptional("getPlace", placeParams(code, name, state, country, latitude, longitude), "place", Place.serializer())
+        } catch (e: SubsonicException.NotFound) {
+            null
+        }
 
     // Like get, for params that may repeat a name.
     internal suspend fun <T> getWith(

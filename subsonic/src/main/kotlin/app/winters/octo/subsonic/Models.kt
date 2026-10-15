@@ -227,6 +227,13 @@ data class AlbumList(val album: List<Album> = emptyList())
 // comes as a read-only playlist naming its kind in `octoList`.
 const val OCTO_LISTS = "octoLists"
 
+// Octo's extension for stations that keep going: getStationSongs sends a
+// station's next songs, leaving out the ones already queued.
+const val OCTO_STATIONS = "octoStations"
+
+@Serializable
+data class StationSongs(val id: String = "", val name: String = "", val entry: List<Song> = emptyList())
+
 // The kinds of Made for you list, in the order Home shows them.
 val OCTO_LIST_KINDS = listOf("liked", "newReleases", "rediscover", "deepCuts")
 
@@ -255,6 +262,10 @@ data class Playlist(
     // Shorter words for the list's cover than its name, when the server
     // gives them ("Popular" for "Popular right now").
     val octoCoverTitle: String? = null,
+    // Which kind of list Octo made this as ("genre", "decade", "year",
+    // "country", "artist", "chart", "forYou", "liked", "station"), from a
+    // server that says; otherwise null.
+    val octoGroup: String? = null,
 )
 
 @Serializable
@@ -349,6 +360,7 @@ data class RadioStation(
     val name: String = "",
     val streamUrl: String = "",
     val coverArt: String? = null,
+    val homePageUrl: String? = null,
 )
 
 @Serializable

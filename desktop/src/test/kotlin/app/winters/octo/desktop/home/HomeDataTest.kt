@@ -27,6 +27,7 @@ import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import app.winters.octo.lists.OctoListGroup
 
 class HomeDataTest {
     private val server = FakeServer()
@@ -48,14 +49,38 @@ class HomeDataTest {
     }
 
     @Test
-    fun onlyOctoIsAskedForStations() = runBlocking {
+    fun onlyOctoFillsTheRadioShelf() = runBlocking {
         server.answer("getAlbumList2", albums("a1"))
-        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"}]}""")
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"}]}""")
         val plain = loadHome(server.connection())
-        assertEquals("a server without stations has none", emptyList<RadioStation>(), plain.stations)
-        assertFalse("getInternetRadioStations" in server.endpoints())
+        assertEquals("a server without Octo's stations has none", emptyList<RadioStation>(), plain.stations)
+        assertEquals("and a station with no stream is not live radio", emptyList<RadioStation>(), plain.live)
         val octo = loadHome(server.connection(listOf("octoAcquisitions:1")))
         assertEquals(listOf("Discover Weekly"), octo.stations!!.map { it.name })
+    }
+
+    // An internet radio station added to the server is a stream: it goes on
+    // the Live radio shelf, from any server, and Octo's own stay on Radio.
+    @Test
+    fun anAddedRadioStationGoesOnTheLiveRadioShelf() = runBlocking {
+        server.answer("getAlbumList2", albums("a1"))
+        val stations = """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"},{"id":"r1","name":"City Radio","streamUrl":"https://radio.example.com/live.mp3","coverArt":"ra-r1"},{"id":"r2","name":"Town FM","streamUrl":"https://town.example.com/fm"}]}"""
+        server.answer("getInternetRadioStations", stations)
+        val octo = loadHome(server.connection(listOf("octoAcquisitions:1")))
+        assertEquals(listOf("Discover Weekly"), octo.stations!!.map { it.name })
+        assertEquals(listOf("City Radio", "Town FM"), octo.live!!.map { it.name })
+        val plain = loadHome(server.connection())
+        assertEquals(listOf("City Radio", "Town FM"), plain.live!!.map { it.name })
+        assertEquals("the stations are read once for both shelves", 2, server.endpoints().count { it == "getInternetRadioStations" })
+    }
+
+    @Test
+    fun withBothRadioShelvesHiddenTheServerIsNotAsked() = runBlocking {
+        server.answer("getAlbumList2", albums("a1"))
+        val home = loadHome(server.connection(listOf("octoAcquisitions:1")), stations = false, live = false)
+        assertFalse("getInternetRadioStations" in server.endpoints())
+        assertNull(home.stations)
+        assertNull(home.live)
     }
 
     // A station Octo has since made anew is taken off the shelf at once,
@@ -63,11 +88,11 @@ class HomeDataTest {
     @Test
     fun aStationTheServerNoLongerHasLeavesTheShelf() {
         server.answer("getAlbumList2", albums("a1"))
-        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly"},{"id":"st2","name":"Chill"}]}""")
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st1","name":"Discover Weekly","coverArt":"st1"},{"id":"st2","name":"Chill","coverArt":"st2"}]}""")
         val store = HomeStore(server.connection(listOf("octoAcquisitions:1")), CoroutineScope(Dispatchers.Unconfined))
         store.refresh()
         waitFor { store.shelves.stations.size == 2 }
-        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st2","name":"Chill"},{"id":"st3","name":"Morning"}]}""")
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"st2","name":"Chill","coverArt":"st2"},{"id":"st3","name":"Morning","coverArt":"st3"}]}""")
         store.stationGone("st1")
         assertFalse(store.shelves.stations.any { it.id == "st1" })
         waitFor { store.shelves.stations.map { it.id } == listOf("st2", "st3") }
@@ -92,7 +117,7 @@ class HomeDataTest {
 
     private val octo = listOf("octoAcquisitions:1")
     private val kept = KeptShelves(
-        stations = listOf(RadioStation("st1", "Morning"), RadioStation("st2", "Chill")),
+        stations = listOf(RadioStation("st1", "Morning", coverArt = "st1"), RadioStation("st2", "Chill", coverArt = "st2")),
         madeForYou = listOf(Playlist("og-new", "New Releases", octoList = "newReleases", songCount = 40)),
         chart = TopSongs(source = "apple", chart = "overall", entry = listOf(TopSong(1, song = Song("s1", "First")))),
     )
@@ -102,7 +127,7 @@ class HomeDataTest {
     private fun stationsAnswer(vararg stations: Pair<String, String>) {
         server.answer(
             "getInternetRadioStations",
-            """"internetRadioStations":{"internetRadioStation":[${stations.joinToString(",") { (id, name) -> """{"id":"$id","name":"$name"}""" }}]}""",
+            """"internetRadioStations":{"internetRadioStation":[${stations.joinToString(",") { (id, name) -> """{"id":"$id","name":"$name","coverArt":"$id"}""" }}]}""",
         )
     }
 
@@ -180,7 +205,7 @@ class HomeDataTest {
     fun hiddenStationsAreNotAskedForUntilShownAgain() {
         server.answer("getAlbumList2", albums("a1"))
         stationsAnswer("st1" to "Morning")
-        var sections = toggleHomeSection(DefaultHomeSections, HomeSection.Stations, shown = false)
+        var sections = toggleHomeSection(toggleHomeSection(DefaultHomeSections, HomeSection.Stations, shown = false), HomeSection.InternetRadio, shown = false)
         val store = HomeStore(server.connection(octo), CoroutineScope(Dispatchers.Unconfined), sections = { sections })
         store.refresh()
         waitFor { store.data != null }
@@ -189,6 +214,19 @@ class HomeDataTest {
         sections = DefaultHomeSections
         store.sectionsChanged()
         waitFor { store.shelves.stations.map { it.id } == listOf("st1") }
+    }
+
+    @Test
+    fun theLiveStreamsAreKeptForNextTime() {
+        val connection = server.connection()
+        server.answer("getAlbumList2", albums("a1"))
+        server.answer("getInternetRadioStations", """"internetRadioStations":{"internetRadioStation":[{"id":"r1","name":"City Radio","streamUrl":"https://radio.example.com/live.mp3"}]}""")
+        val store = HomeStore(connection, CoroutineScope(Dispatchers.Unconfined), kept = shelfStore())
+        store.refresh()
+        waitFor { store.shelves.live.map { it.id } == listOf("r1") }
+        waitFor { shelfStore().read(connection.server.key)?.live?.map { it.id } == listOf("r1") }
+        val again = HomeStore(connection, CoroutineScope(Dispatchers.Unconfined), kept = shelfStore())
+        assertEquals("before anything is asked", listOf("City Radio"), again.shelves.live.map { it.name })
     }
 
     @Test
@@ -235,5 +273,24 @@ class HomeDataTest {
         assertEquals(listOf("og-liked", "og-new", "og-re", "og-deep", "og-later"), madeForYou(playlists).map { it.id })
         assertEquals(listOf("mine"), yourPlaylists(playlists).map { it.id })
         assertTrue("a server without the lists marks none", madeForYou(listOf(Playlist("a"), Playlist("b"))).isEmpty())
+    }
+
+    // On Octo, its mixes and stations leave "Your playlists" for their own
+    // shelves; someone else's and a smart playlist stay, read-only or not.
+    @Test
+    fun octosOwnListsAreNotTheListenersPlaylists() {
+        val pop = Playlist("og00000000000000000001", "Pop Mix", owner = "ana", readonly = true, octoGroup = "genre")
+        val decade = Playlist("og00000000000000000002", "1990s Mix", owner = "ana", readonly = true, octoGroup = "decade")
+        val station = Playlist("or00000000000000000003", "Your Radio", owner = "ana", readonly = true, octoGroup = "station")
+        val shared = Playlist("5f3c1", "Road trip", owner = "ben", readonly = true)
+        val smart = Playlist("5f3c2", "Top rated", owner = "ana", readonly = true)
+        val all = listOf(Playlist("mine", owner = "ana"), pop, decade, station, shared, smart)
+        assertEquals(listOf("mine", "5f3c1", "5f3c2"), yourPlaylists(all, "ana", isOcto = true).map { it.id })
+        assertEquals(all.map { it.id }, yourPlaylists(all, "ana", isOcto = false).map { it.id })
+        val groups = octoLists(all, "ana", isOcto = true).toMap()
+        assertEquals(listOf("Pop Mix"), groups[OctoListGroup.Genres]?.map { it.name })
+        assertEquals(listOf("1990s Mix"), groups[OctoListGroup.Years]?.map { it.name })
+        assertEquals(listOf("Your Radio"), groups[OctoListGroup.Stations]?.map { it.name })
+        assertTrue(octoLists(all, "ana", isOcto = false).isEmpty())
     }
 }

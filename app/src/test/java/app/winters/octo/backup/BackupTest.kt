@@ -3,13 +3,18 @@ package app.winters.octo.backup
 import app.winters.octo.catalog.PinKind
 import app.winters.octo.catalog.TrackEntity
 import app.winters.octo.listening.SendPlays
+import app.winters.octo.liveradio.KeptStations
+import app.winters.octo.liveradio.LiveStation
 import app.winters.octo.offline.CacheSize
 import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.CopyPreference
+import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StreamQuality
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.playlists.BYTE_ORDER_MARK
+import app.winters.octo.sound.Crossfeed
+import app.winters.octo.sound.CrossfeedPreset
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.SoundSettings
 import org.junit.Assert.assertEquals
@@ -26,13 +31,13 @@ class BackupTest {
 
     private val full = Backup(
         createdAt = 1_758_000_000_000,
-        player = PlayerPrefs(crossfade = true, crossfadeSeconds = 4, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true),
+        player = PlayerPrefs(crossfade = true, crossfadeSeconds = 4, crossfadeCurve = FadeCurve.SCurve, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true),
         streaming = StreamPrefs(CopyPreference.BestQuality, StreamQuality.Kbps320, StreamQuality.Kbps128),
         sound = SoundBackup(
             perOutput = true,
             profiles = mapOf(
                 "all" to SoundSettings(),
-                "bluetooth:AA:BB" to SoundSettings(eqEnabled = true, mode = EqMode.Parametric, preampDb = -3f),
+                "bluetooth:AA:BB" to SoundSettings(eqEnabled = true, mode = EqMode.Parametric, preampDb = -3f, crossfeed = Crossfeed(on = true, preset = CrossfeedPreset.Custom, cutHz = 900, feedDb = 8f)),
             ),
         ),
         presets = listOf(PresetBackup("Mine", List(10) { it.toFloat() })),
@@ -56,8 +61,28 @@ class BackupTest {
         val text = encodeBackup(Backup(player = PlayerPrefs()))
         listOf(
             "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
-            "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo",
+            "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "crossfadeCurve",
         ).forEach { assertTrue("$it is missing", text.contains("\"$it\"")) }
+    }
+
+    @Test
+    fun keptLiveStationsReadBackTheSame() {
+        val kept = KeptStations()
+            .keep(LiveStation("u1", "KEXP", "https://kexp.example/live.aac", favicon = "https://kexp.example/icon.png", codec = "AAC", bitrate = 128, state = "Washington", countryCode = "US", tags = listOf("indie")))
+            .keep(LiveStation("u2", "FIP", "https://fip.example/hls.m3u8", hls = true, country = "France"))
+        val backup = Backup(keptStations = kept.stations)
+        val read = decodeBackup(encodeBackup(backup)) as BackupRead.Read
+        assertEquals(kept.stations, read.backup.keptStations)
+        assertTrue(describeBackup(backup).contains("2 kept live radio stations"))
+        // A backup made before stations were kept has none.
+        assertTrue((decodeBackup("{\"kind\": \"octo-settings\"}") as BackupRead.Read).backup.keptStations.isEmpty())
+    }
+
+    @Test
+    fun anUnknownCrossfadeCurveReadsAsTheDefault() {
+        val text = encodeBackup(Backup(player = PlayerPrefs(crossfadeCurve = FadeCurve.Linear))).replace("\"Linear\"", "\"Bungee\"")
+        val read = decodeBackup(text) as BackupRead.Read
+        assertEquals(FadeCurve.EqualPower, read.backup.player?.crossfadeCurve)
     }
 
     @Test
