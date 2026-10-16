@@ -309,7 +309,14 @@ data class Appearance(
     // place of the cover, "full_screen" behind the player, or "off"
     // (AnimatedArtSetting's keys; anything else reads as the default).
     @SerialName(AnimatedArtSetting.PREF_KEY) val animatedArt: String = AnimatedArtSetting.Default.key,
+    // The fork's album grids (Albums, an artist's albums, Home's shelves):
+    // still covers, the tile under the pointer moving, or every tile in
+    // sight moving. Only while Animated art is on.
+    val animatedGrids: AnimatedGrids = AnimatedGrids.Hover,
 )
+
+@Serializable
+enum class AnimatedGrids { Off, Hover, Always }
 
 // The Animated art choice.
 val Appearance.animatedArtSetting: AnimatedArtSetting get() = AnimatedArtSetting.fromKey(animatedArt)
