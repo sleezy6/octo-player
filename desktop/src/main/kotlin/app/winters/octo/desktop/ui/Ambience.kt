@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.desktop.system.OctopusArt
 import app.winters.octo.design.motionScale
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -55,14 +56,16 @@ fun keyColour(argb: Int): Color {
 // The glass's rim with a fifth of the key colour in it.
 fun keyRim(key: Color, alpha: Float = 0.12f): Color = lerp(Color.White, key, 0.2f).copy(alpha = alpha)
 
-// Octo's icon made ready for the wash, once for the whole run.
+// Octo's icon (drawn from the vector at OCTO_ART_PX) made ready for the
+// wash, once for the whole run.
 internal object OctoArt {
+    private const val OCTO_ART_PX = 512
     @Volatile private var made: WashCover? = null
 
     fun cover(tuning: WashTuning): WashCover {
         made?.takeIf { it.key == keyFor(tuning) }?.let { return it }
         val image = runCatching {
-            AppState::class.java.getResourceAsStream("/octo-icon.png")!!.use { Image.makeFromEncoded(it.readBytes()) }
+            OctopusArt.icon(OCTO_ART_PX, shape = null)
         }.getOrNull()
         return WashCovers.prepared(keyFor(tuning), image, tuning).also { made = it }
     }
@@ -98,8 +101,9 @@ fun OctoAmbience(app: AppState, moving: Boolean, veil: Float, modifier: Modifier
 // The key colour for a prepared cover.
 fun WashCover.keyColour(): Color = if (main == 0) OctoKey else keyColour(main)
 
-// Whether the window is on screen: not minimised, and not hidden in the
-// tray. The window's moving colours rest while it is not.
+// Whether what reads it is on screen: the window not minimized and not
+// hidden in the tray, and for the frame and its colours, not covered by
+// the full player. What moves rests while it is not.
 val LocalWindowShown = compositionLocalOf { true }
 
 // Whether the window is drawn by the processor, without the graphics card

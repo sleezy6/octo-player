@@ -50,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -96,6 +97,9 @@ val BarBottomGap = 14.dp
 private val TabIconSize = 23.dp
 private val Gap = 10.dp
 
+// How often a progress ring round a small artwork steps while playing.
+const val RingStepMs = 1_000L
+
 // What the bar's buttons do.
 class BarActions(
     val onSelect: (Int) -> Unit,
@@ -127,7 +131,10 @@ fun BottomBar(
     marks: Map<Int, String> = emptyMap(),
 ) {
     val grown by animateFloatAsState(if (playerShown) 1f else 0f, spring(0.75f, 200f), label = "bar shape")
-    val position = rememberPositionMs(now, positionMs)
+    // The ring round the button is the only thing here that moves with the
+    // song, a pixel or two a second, so it steps once a second, with the
+    // glow behind the page.
+    val position = rememberPositionMs(now, positionMs, everyMs = RingStepMs)
     val progress = { now.fractionAt(position.longValue) }
     val swipe = rememberBarSwipe(hasSong = now.trackId != null, actions)
 
@@ -162,9 +169,13 @@ fun BottomBar(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                             role = Role.Button,
+                            onClickLabel = if (now.trackId != null) "Show the player controls" else null,
                             onClick = actions.onRoundButton,
                         )
-                        .semantics { contentDescription = "Now playing" },
+                        .semantics {
+                            contentDescription = nowPlayingWords(now)
+                            nowPlayingState(now).takeIf(String::isNotEmpty)?.let { stateDescription = it }
+                        },
                 ) {
                     NowPlayingFace(now, progress)
                 }
@@ -330,8 +341,8 @@ private fun TabButton(
     }
 }
 
-// The small player: artwork with its progress ring, the song, and back,
-// play and next. Tapping anywhere else opens the full player; so does a
+// The small player: artwork with its progress ring (breathing while
+// paused), the song, and back, play and next. Tapping anywhere else opens the full player; so does a
 // swipe up, and a swipe sideways skips.
 @Composable
 private fun PlayerCapsule(
@@ -364,7 +375,7 @@ private fun PlayerCapsule(
         ) {
             Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
                 Artwork(now.artwork, 36.dp, artModifier, shape = artShape, outside = isOutsideLibrary(now.trackId))
-                ProgressRing(progress, Modifier.matchParentSize().padding(1.dp))
+                ProgressRing(progress, paused = isPaused(now), modifier = Modifier.matchParentSize().padding(1.dp), whole = now.live != null)
             }
             Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                 SongTitle(

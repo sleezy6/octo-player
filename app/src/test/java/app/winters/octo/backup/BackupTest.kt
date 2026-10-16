@@ -10,6 +10,7 @@ import app.winters.octo.offline.OfflinePrefs
 import app.winters.octo.playback.CopyPreference
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StreamQuality
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.StreamPrefs
 import app.winters.octo.playlists.BYTE_ORDER_MARK
@@ -17,6 +18,7 @@ import app.winters.octo.sound.Crossfeed
 import app.winters.octo.sound.CrossfeedPreset
 import app.winters.octo.sound.EqMode
 import app.winters.octo.sound.SoundSettings
+import app.winters.octo.theme.AccentChoice
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -31,7 +33,7 @@ class BackupTest {
 
     private val full = Backup(
         createdAt = 1_758_000_000_000,
-        player = PlayerPrefs(crossfade = true, crossfadeSeconds = 4, crossfadeCurve = FadeCurve.SCurve, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true),
+        player = PlayerPrefs(crossfade = true, crossfadeSeconds = 4, crossfadeCurve = FadeCurve.SCurve, speed = 1.25f, keepPitch = false, skipSilence = true, resumeBluetooth = true, accent = AccentChoice.Coral),
         streaming = StreamPrefs(CopyPreference.BestQuality, StreamQuality.Kbps320, StreamQuality.Kbps128),
         sound = SoundBackup(
             perOutput = true,
@@ -62,6 +64,8 @@ class BackupTest {
         listOf(
             "liveBackground", "crossfade", "crossfadeSeconds", "lyricsOnline", "speed", "keepPitch", "pitchSemitones",
             "skipSilence", "resumeWired", "resumeBluetooth", "resumeAlways", "smartTransitions", "filterSweeps", "matchTempo", "crossfadeCurve",
+            "accent", "glassTint",
+            "animatedArt",
         ).forEach { assertTrue("$it is missing", text.contains("\"$it\"")) }
     }
 
@@ -83,6 +87,35 @@ class BackupTest {
         val text = encodeBackup(Backup(player = PlayerPrefs(crossfadeCurve = FadeCurve.Linear))).replace("\"Linear\"", "\"Bungee\"")
         val read = decodeBackup(text) as BackupRead.Read
         assertEquals(FadeCurve.EqualPower, read.backup.player?.crossfadeCurve)
+    }
+
+    @Test
+    fun theAccentColorIsKept() {
+        for (accent in AccentChoice.entries) {
+            val read = decodeBackup(encodeBackup(Backup(player = PlayerPrefs(accent = accent)))) as BackupRead.Read
+            assertEquals(accent, read.backup.player?.accent)
+        }
+        assertTrue(encodeBackup(Backup(player = PlayerPrefs(accent = AccentChoice.FromArt))).contains("\"accent\": \"FromArt\""))
+        // One this app does not know, from a newer Octo, reads as Octo's own.
+        val newer = encodeBackup(Backup(player = PlayerPrefs(accent = AccentChoice.Mint))).replace("\"Mint\"", "\"Chartreuse\"")
+        assertEquals(AccentChoice.Octo, (decodeBackup(newer) as BackupRead.Read).backup.player?.accent)
+        // A backup from before accents leaves Octo's own.
+        assertEquals(AccentChoice.Octo, (decodeBackup("{\"kind\": \"octo-settings\", \"player\": {}}") as BackupRead.Read).backup.player?.accent)
+    }
+
+    @Test
+    fun theAnimatedArtChoiceIsKept() {
+        val text = encodeBackup(Backup(player = PlayerPrefs(animatedArt = AnimatedArtSetting.FullScreen)))
+        // By the setting's key, as the other apps write it.
+        assertTrue(text.contains("\"animatedArt\": \"full_screen\""))
+        assertEquals(AnimatedArtSetting.FullScreen, (decodeBackup(text) as BackupRead.Read).backup.player?.animatedArt)
+        val off = decodeBackup("{\"kind\": \"octo-settings\", \"player\": {\"animatedArt\": \"off\"}}") as BackupRead.Read
+        assertEquals(AnimatedArtSetting.Off, off.backup.player?.animatedArt)
+        // One this app does not know reads as the default, Square.
+        val unknown = decodeBackup(text.replace("\"full_screen\"", "\"hologram\"")) as BackupRead.Read
+        assertEquals(AnimatedArtSetting.Square, unknown.backup.player?.animatedArt)
+        // A backup from before the setting has it at Square.
+        assertEquals(AnimatedArtSetting.Square, PlayerPrefs().animatedArt)
     }
 
     @Test

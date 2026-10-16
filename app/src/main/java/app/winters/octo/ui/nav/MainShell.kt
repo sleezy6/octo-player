@@ -41,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -58,6 +59,7 @@ import app.winters.octo.device.DeviceLibrary
 import app.winters.octo.playback.PlaybackConnection
 import app.winters.octo.player.PlayerArtCorner
 import app.winters.octo.player.PlayerOverlay
+import app.winters.octo.animated.LocalPlayerCovers
 import app.winters.octo.ui.admin.OctoAdminScreen
 import app.winters.octo.ui.imports.ImportScreen
 import app.winters.octo.ui.imports.ImportShellViewModel
@@ -196,6 +198,8 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
     // The bar's small player, and the full one over everything.
     var barPlayer by rememberSaveable { mutableStateOf(false) }
     var playerOpen by rememberSaveable { mutableStateOf(false) }
+    // The full player hides everything under it, so the pages need not draw.
+    var playerCovers by remember { mutableStateOf(false) }
     // A search asked for elsewhere (the live player's "Find this song in
     // Octo"): the Search tab, at its top, with the player closed.
     val searchAsks = hiltViewModel<SearchShellViewModel>().asks
@@ -280,13 +284,20 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
         LocalPageArtworks provides pageArtworks,
         LocalOpenPage provides open,
         LocalNowPlayingId provides NowMark(now.trackId, now.isPlaying),
+        LocalPlayerCovers provides (playerOpen && hasTrack),
     ) {
         SharedTransitionLayout {
             // Any press marks where a menu it opens should float.
             Box(Modifier.fillMaxSize().background(OctoColors.Background).pressSpot(pressSpot, wholeArea = true)) {
                 // The glow sits under the pages and is part of what the bar
-                // frosts. It rests while the full player covers it.
-                Box(Modifier.fillMaxSize().hazeSource(haze)) {
+                // frosts. It rests while the full player covers it, and
+                // nothing here is drawn while the player hides it all.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .drawWithContent { if (!playerCovers) drawContent() }
+                        .hazeSource(haze),
+                ) {
                     AmbientBackdrop(stack.lastOrNull(), now, pageArtworks, awake = !playerOpen)
                     NavDisplay(
                         entries = tabPages[selected],
@@ -345,6 +356,7 @@ fun MainShell(library: DeviceLibrary, playback: PlaybackConnection, feedback: Fe
                 ) {
                     PlayerOverlay(
                         backdrop = playerHaze,
+                        onCovers = { playerCovers = it },
                         artModifier = Modifier.sharedElement(rememberSharedContentState(ArtKey), this),
                         onClose = { playerOpen = false },
                         onOpenArtist = { id ->

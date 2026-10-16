@@ -11,7 +11,6 @@ pub mod error;
 pub mod fifo;
 pub mod lane;
 pub mod mixer;
-pub mod motion;
 #[cfg(feature = "opus")]
 pub mod opus;
 pub mod output;
@@ -21,10 +20,10 @@ pub mod scout;
 pub mod sound;
 pub mod source;
 pub mod timeline;
+pub mod video;
 
 pub use api::{Engine, EngineEvent, EngineListener, QueueItem};
 pub use automix::AutomixSettings;
-pub use motion::{MotionCover, MotionFrame};
 
 #[cfg(test)]
 mod testing;

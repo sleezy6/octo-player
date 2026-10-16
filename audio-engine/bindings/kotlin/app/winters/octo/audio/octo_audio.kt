@@ -701,6 +701,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_func_graphic_bands(
     ): Int
+    external fun uniffi_octo_audio_checksum_func_loop_video_available(
+    ): Int
     external fun uniffi_octo_audio_checksum_method_engine_current_device(
     ): Int
     external fun uniffi_octo_audio_checksum_method_engine_devices(
@@ -779,23 +781,29 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_octo_audio_checksum_method_enginelistener_on_event(
     ): Int
-    external fun uniffi_octo_audio_checksum_method_motioncover_frame_count(
+    external fun uniffi_octo_audio_checksum_method_loopvideo_copy_frame(
     ): Int
-    external fun uniffi_octo_audio_checksum_method_motioncover_height(
+    external fun uniffi_octo_audio_checksum_method_loopvideo_failure(
     ): Int
-    external fun uniffi_octo_audio_checksum_method_motioncover_loop_us(
+    external fun uniffi_octo_audio_checksum_method_loopvideo_frames(
     ): Int
-    external fun uniffi_octo_audio_checksum_method_motioncover_next_frame(
+    external fun uniffi_octo_audio_checksum_method_loopvideo_height(
     ): Int
-    external fun uniffi_octo_audio_checksum_method_motioncover_rewind(
+    external fun uniffi_octo_audio_checksum_method_loopvideo_hold(
     ): Int
-    external fun uniffi_octo_audio_checksum_method_motioncover_width(
+    external fun uniffi_octo_audio_checksum_method_loopvideo_play(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_stop(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_wait_frame(
+    ): Int
+    external fun uniffi_octo_audio_checksum_method_loopvideo_width(
     ): Int
     external fun uniffi_octo_audio_checksum_constructor_engine_new(
     ): Int
     external fun uniffi_octo_audio_checksum_constructor_engine_new_silent(
     ): Int
-    external fun uniffi_octo_audio_checksum_constructor_motioncover_open(
+    external fun uniffi_octo_audio_checksum_constructor_loopvideo_open(
     ): Int
     external fun ffi_octo_audio_uniffi_contract_version(
     ): Int
@@ -910,28 +918,36 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_octo_audio_fn_method_enginelistener_on_event(`ptr`: Long,`event`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    external fun uniffi_octo_audio_fn_clone_motioncover(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_octo_audio_fn_clone_loopvideo(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    external fun uniffi_octo_audio_fn_free_motioncover(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_octo_audio_fn_free_loopvideo(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    external fun uniffi_octo_audio_fn_constructor_motioncover_open(`path`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_octo_audio_fn_constructor_loopvideo_open(`path`: RustBuffer.ByValue,`width`: Int,`height`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    external fun uniffi_octo_audio_fn_method_motioncover_frame_count(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Int
-    external fun uniffi_octo_audio_fn_method_motioncover_height(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Int
-    external fun uniffi_octo_audio_fn_method_motioncover_loop_us(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_octo_audio_fn_method_loopvideo_copy_frame(`ptr`: Long,`address`: Long,`rowBytes`: Int,`length`: Long,`have`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    external fun uniffi_octo_audio_fn_method_motioncover_next_frame(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_octo_audio_fn_method_loopvideo_failure(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    external fun uniffi_octo_audio_fn_method_motioncover_rewind(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_octo_audio_fn_method_loopvideo_frames(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_octo_audio_fn_method_loopvideo_height(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
+    external fun uniffi_octo_audio_fn_method_loopvideo_hold(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    external fun uniffi_octo_audio_fn_method_motioncover_width(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_octo_audio_fn_method_loopvideo_play(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_method_loopvideo_stop(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    external fun uniffi_octo_audio_fn_method_loopvideo_wait_frame(`ptr`: Long,`have`: Long,`timeoutMs`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
+    external fun uniffi_octo_audio_fn_method_loopvideo_width(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Int
     external fun uniffi_octo_audio_fn_func_equalizer_presets(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_octo_audio_fn_func_graphic_bands(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_octo_audio_fn_func_loop_video_available(uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     external fun ffi_octo_audio_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_octo_audio_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1057,6 +1073,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_func_graphic_bands() and 0xFFFF) != 40024) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if ((lib.uniffi_octo_audio_checksum_func_loop_video_available() and 0xFFFF) != 58253) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_octo_audio_checksum_method_engine_current_device() and 0xFFFF) != 45769) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1174,22 +1193,31 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_method_enginelistener_on_event() and 0xFFFF) != 5729) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_motioncover_frame_count() and 0xFFFF) != 14273) {
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_copy_frame() and 0xFFFF) != 1344) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_motioncover_height() and 0xFFFF) != 21533) {
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_failure() and 0xFFFF) != 31111) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_motioncover_loop_us() and 0xFFFF) != 59854) {
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_frames() and 0xFFFF) != 61814) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_motioncover_next_frame() and 0xFFFF) != 45081) {
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_height() and 0xFFFF) != 11629) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_motioncover_rewind() and 0xFFFF) != 54757) {
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_hold() and 0xFFFF) != 55564) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_method_motioncover_width() and 0xFFFF) != 11417) {
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_play() and 0xFFFF) != 62931) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_stop() and 0xFFFF) != 4667) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_wait_frame() and 0xFFFF) != 21785) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_octo_audio_checksum_method_loopvideo_width() and 0xFFFF) != 38683) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_octo_audio_checksum_constructor_engine_new() and 0xFFFF) != 64625) {
@@ -1198,7 +1226,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_octo_audio_checksum_constructor_engine_new_silent() and 0xFFFF) != 2833) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_octo_audio_checksum_constructor_motioncover_open() and 0xFFFF) != 32271) {
+    if ((lib.uniffi_octo_audio_checksum_constructor_loopvideo_open() and 0xFFFF) != 62983) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1604,25 +1632,6 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
         val byteBuf = toUtf8(value)
         buf.putInt(byteBuf.limit())
         buf.put(byteBuf)
-    }
-}
-
-/**
- * @suppress
- */
-public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
-    override fun read(buf: ByteBuffer): ByteArray {
-        val len = buf.getInt()
-        val byteArr = ByteArray(len)
-        buf.get(byteArr)
-        return byteArr
-    }
-    override fun allocationSize(value: ByteArray): ULong {
-        return 4UL + value.size.toULong()
-    }
-    override fun write(value: ByteArray, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        buf.put(value)
     }
 }
 
@@ -3102,37 +3111,62 @@ public object FfiConverterTypeEngineListener: FfiConverter<EngineListener, Long>
 
 
 /**
- * An animated cover read from a file, playing in a loop. Each call to
- * `next_frame` decodes the next picture in the order it is shown; after
- * the last comes the first again. Safe to share, though one reader at a
- * time makes sense: the pictures come in turn.
+ * A muted, looping video, decoded on its own thread. It starts held:
+ * `play` starts it. Frames are read with `copy_frame`, into memory the
+ * app owns, so no frame crosses into the app as a new array.
  */
-public interface MotionCoverInterface {
+public interface LoopVideoInterface {
     
     /**
-     * How many pictures one time round holds.
+     * Copies the newest frame (BGRA, alpha 255, top row first) into the
+     * memory at `address`, `length` bytes with rows `row_bytes` apart,
+     * when it is newer than frame `have`. Gives the newest frame's number,
+     * so the same number back means nothing was copied.
+     *
+     * `address` must be writable memory of at least `length` bytes that
+     * stays valid for the call, such as a bitmap's own pixels.
      */
-    fun `frameCount`(): kotlin.UInt
+    fun `copyFrame`(`address`: kotlin.ULong, `rowBytes`: kotlin.UInt, `length`: kotlin.ULong, `have`: kotlin.ULong): kotlin.ULong
     
+    /**
+     * Why the loop stopped decoding, when it failed.
+     */
+    fun `failure`(): kotlin.String?
+    
+    /**
+     * How many frames have been shown so far; 0 until the first.
+     */
+    fun `frames`(): kotlin.ULong
+    
+    /**
+     * The frames' height in pixels.
+     */
     fun `height`(): kotlin.UInt
     
     /**
-     * How long one time round lasts.
+     * Holds on the frame shown; nothing is decoded until `play`.
      */
-    fun `loopUs`(): kotlin.ULong
+    fun `hold`()
     
     /**
-     * The next picture, starting over after the last.
+     * Plays from where it was held.
      */
-    fun `nextFrame`(): MotionFrame
+    fun `play`()
     
     /**
-     * Goes back to the first picture.
+     * Stops for good and lets the decoder go.
      */
-    fun `rewind`()
+    fun `stop`()
     
     /**
-     * The picture's size as the file declares it.
+     * Waits up to `timeout_ms` for a frame newer than `have`; returns
+     * sooner when the loop is held, stopped or fails. Gives the newest
+     * frame's number.
+     */
+    fun `waitFrame`(`have`: kotlin.ULong, `timeoutMs`: kotlin.UInt): kotlin.ULong
+    
+    /**
+     * The frames' width in pixels.
      */
     fun `width`(): kotlin.UInt
     
@@ -3140,12 +3174,11 @@ public interface MotionCoverInterface {
 }
 
 /**
- * An animated cover read from a file, playing in a loop. Each call to
- * `next_frame` decodes the next picture in the order it is shown; after
- * the last comes the first again. Safe to share, though one reader at a
- * time makes sense: the pictures come in turn.
+ * A muted, looping video, decoded on its own thread. It starts held:
+ * `play` starts it. Frames are read with `copy_frame`, into memory the
+ * app owns, so no frame crosses into the app as a new array.
  */
-open class MotionCover: Disposable, AutoCloseable, MotionCoverInterface
+open class LoopVideo: Disposable, AutoCloseable, LoopVideoInterface
 {
 
     @Suppress("UNUSED_PARAMETER")
@@ -3229,7 +3262,7 @@ open class MotionCover: Disposable, AutoCloseable, MotionCoverInterface
                 return;
             }
             uniffiRustCall { status ->
-                UniffiLib.uniffi_octo_audio_fn_free_motioncover(handle, status)
+                UniffiLib.uniffi_octo_audio_fn_free_loopvideo(handle, status)
             }
         }
     }
@@ -3242,31 +3275,45 @@ open class MotionCover: Disposable, AutoCloseable, MotionCoverInterface
             throw InternalException("uniffiCloneHandle() called on NoHandle object");
         }
         return uniffiRustCall() { status ->
-            UniffiLib.uniffi_octo_audio_fn_clone_motioncover(handle, status)
+            UniffiLib.uniffi_octo_audio_fn_clone_loopvideo(handle, status)
         }
     }
 
     
     /**
-     * How many pictures one time round holds.
-     */override fun `frameCount`(): kotlin.UInt {
-            return FfiConverterUInt.lift(
+     * Copies the newest frame (BGRA, alpha 255, top row first) into the
+     * memory at `address`, `length` bytes with rows `row_bytes` apart,
+     * when it is newer than frame `have`. Gives the newest frame's number,
+     * so the same number back means nothing was copied.
+     *
+     * `address` must be writable memory of at least `length` bytes that
+     * stays valid for the call, such as a bitmap's own pixels.
+     */
+    @Throws(EngineException::class)override fun `copyFrame`(`address`: kotlin.ULong, `rowBytes`: kotlin.UInt, `length`: kotlin.ULong, `have`: kotlin.ULong): kotlin.ULong {
+            return FfiConverterULong.lift(
     callWithHandle {
-    uniffiRustCall() { _status ->
-    UniffiLib.uniffi_octo_audio_fn_method_motioncover_frame_count(
+    uniffiRustCallWithError(EngineException) { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_copy_frame(
         it,
-        _status)
+        
+        FfiConverterULong.lower(`address`),
+        FfiConverterUInt.lower(`rowBytes`),
+        FfiConverterULong.lower(`length`),
+        FfiConverterULong.lower(`have`),_status)
 }
     }
     )
     }
     
 
-    override fun `height`(): kotlin.UInt {
-            return FfiConverterUInt.lift(
+    
+    /**
+     * Why the loop stopped decoding, when it failed.
+     */override fun `failure`(): kotlin.String? {
+            return FfiConverterOptionalString.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
-    UniffiLib.uniffi_octo_audio_fn_method_motioncover_height(
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_failure(
         it,
         _status)
 }
@@ -3277,12 +3324,12 @@ open class MotionCover: Disposable, AutoCloseable, MotionCoverInterface
 
     
     /**
-     * How long one time round lasts.
-     */override fun `loopUs`(): kotlin.ULong {
+     * How many frames have been shown so far; 0 until the first.
+     */override fun `frames`(): kotlin.ULong {
             return FfiConverterULong.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
-    UniffiLib.uniffi_octo_audio_fn_method_motioncover_loop_us(
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_frames(
         it,
         _status)
 }
@@ -3293,13 +3340,12 @@ open class MotionCover: Disposable, AutoCloseable, MotionCoverInterface
 
     
     /**
-     * The next picture, starting over after the last.
-     */
-    @Throws(EngineException::class)override fun `nextFrame`(): MotionFrame {
-            return FfiConverterTypeMotionFrame.lift(
+     * The frames' height in pixels.
+     */override fun `height`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
     callWithHandle {
-    uniffiRustCallWithError(EngineException) { _status ->
-    UniffiLib.uniffi_octo_audio_fn_method_motioncover_next_frame(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_height(
         it,
         _status)
 }
@@ -3310,12 +3356,12 @@ open class MotionCover: Disposable, AutoCloseable, MotionCoverInterface
 
     
     /**
-     * Goes back to the first picture.
-     */override fun `rewind`()
+     * Holds on the frame shown; nothing is decoded until `play`.
+     */override fun `hold`()
         = 
     callWithHandle {
     uniffiRustCall() { _status ->
-    UniffiLib.uniffi_octo_audio_fn_method_motioncover_rewind(
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_hold(
         it,
         _status)
 }
@@ -3325,12 +3371,62 @@ open class MotionCover: Disposable, AutoCloseable, MotionCoverInterface
 
     
     /**
-     * The picture's size as the file declares it.
+     * Plays from where it was held.
+     */override fun `play`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_play(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Stops for good and lets the decoder go.
+     */override fun `stop`()
+        = 
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_stop(
+        it,
+        _status)
+}
+    }
+    
+    
+
+    
+    /**
+     * Waits up to `timeout_ms` for a frame newer than `have`; returns
+     * sooner when the loop is held, stopped or fails. Gives the newest
+     * frame's number.
+     */override fun `waitFrame`(`have`: kotlin.ULong, `timeoutMs`: kotlin.UInt): kotlin.ULong {
+            return FfiConverterULong.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_wait_frame(
+        it,
+        
+        FfiConverterULong.lower(`have`),
+        FfiConverterUInt.lower(`timeoutMs`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * The frames' width in pixels.
      */override fun `width`(): kotlin.UInt {
             return FfiConverterUInt.lift(
     callWithHandle {
     uniffiRustCall() { _status ->
-    UniffiLib.uniffi_octo_audio_fn_method_motioncover_width(
+    UniffiLib.uniffi_octo_audio_fn_method_loopvideo_width(
         it,
         _status)
 }
@@ -3348,17 +3444,20 @@ open class MotionCover: Disposable, AutoCloseable, MotionCoverInterface
     companion object {
         
     /**
-     * Reads the animated cover at `path`. Fails as unsupported for a file
-     * that is not H.264 in fragmented MP4, and as a decode failure for one
-     * that is damaged.
+     * Opens the video file at `path` through the system's decoder, scaled
+     * down to cover `width` by `height` pixels where the decoder can (0
+     * for the file's own size). Fails with `Unsupported` where the system
+     * has no decoder for it (Linux without GStreamer, say).
      */
-    @Throws(EngineException::class) fun `open`(`path`: kotlin.String): MotionCover {
-            return FfiConverterTypeMotionCover.lift(
+    @Throws(EngineException::class) fun `open`(`path`: kotlin.String, `width`: kotlin.UInt, `height`: kotlin.UInt): LoopVideo {
+            return FfiConverterTypeLoopVideo.lift(
     uniffiRustCallWithError(EngineException) { _status ->
-    UniffiLib.uniffi_octo_audio_fn_constructor_motioncover_open(
+    UniffiLib.uniffi_octo_audio_fn_constructor_loopvideo_open(
     
         
-        FfiConverterString.lower(`path`),_status)
+        FfiConverterString.lower(`path`),
+        FfiConverterUInt.lower(`width`),
+        FfiConverterUInt.lower(`height`),_status)
 }
     )
     }
@@ -3373,22 +3472,22 @@ open class MotionCover: Disposable, AutoCloseable, MotionCoverInterface
 /**
  * @suppress
  */
-public object FfiConverterTypeMotionCover: FfiConverter<MotionCover, Long> {
-    override fun lower(value: MotionCover): Long {
+public object FfiConverterTypeLoopVideo: FfiConverter<LoopVideo, Long> {
+    override fun lower(value: LoopVideo): Long {
         return value.uniffiCloneHandle()
     }
 
-    override fun lift(value: Long): MotionCover {
-        return MotionCover(UniffiWithHandle, value)
+    override fun lift(value: Long): LoopVideo {
+        return LoopVideo(UniffiWithHandle, value)
     }
 
-    override fun read(buf: ByteBuffer): MotionCover {
+    override fun read(buf: ByteBuffer): LoopVideo {
         return lift(buf.getLong())
     }
 
-    override fun allocationSize(value: MotionCover) = 8UL
+    override fun allocationSize(value: LoopVideo) = 8UL
 
-    override fun write(value: MotionCover, buf: ByteBuffer) {
+    override fun write(value: LoopVideo, buf: ByteBuffer) {
         buf.putLong(lower(value))
     }
 }
@@ -3838,58 +3937,6 @@ public object FfiConverterTypeHttpHeader: FfiConverterRustBuffer<HttpHeader> {
     override fun write(value: HttpHeader, buf: ByteBuffer) {
             FfiConverterString.write(value.`name`, buf)
             FfiConverterString.write(value.`value`, buf)
-    }
-}
-
-
-
-/**
- * One picture of an animated cover: RGBA, four bytes a pixel, rows top
- * down with no padding, and how long it stays on screen.
- */
-data class MotionFrame (
-    val `width`: kotlin.UInt
-    , 
-    val `height`: kotlin.UInt
-    , 
-    val `pixels`: kotlin.ByteArray
-    , 
-    val `durationUs`: kotlin.ULong
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeMotionFrame: FfiConverterRustBuffer<MotionFrame> {
-    override fun read(buf: ByteBuffer): MotionFrame {
-        return MotionFrame(
-            FfiConverterUInt.read(buf),
-            FfiConverterUInt.read(buf),
-            FfiConverterByteArray.read(buf),
-            FfiConverterULong.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: MotionFrame) = (
-            FfiConverterUInt.allocationSize(value.`width`) +
-            FfiConverterUInt.allocationSize(value.`height`) +
-            FfiConverterByteArray.allocationSize(value.`pixels`) +
-            FfiConverterULong.allocationSize(value.`durationUs`)
-    )
-
-    override fun write(value: MotionFrame, buf: ByteBuffer) {
-            FfiConverterUInt.write(value.`width`, buf)
-            FfiConverterUInt.write(value.`height`, buf)
-            FfiConverterByteArray.write(value.`pixels`, buf)
-            FfiConverterULong.write(value.`durationUs`, buf)
     }
 }
 
@@ -6267,6 +6314,20 @@ public object FfiConverterSequenceTypeTrustedCertificate: FfiConverterRustBuffer
             return FfiConverterSequenceFloat.lift(
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_octo_audio_fn_func_graphic_bands(
+    
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * Whether this computer can decode loops at all: false on Linux without
+         * GStreamer, for one.
+         */ fun `loopVideoAvailable`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_octo_audio_fn_func_loop_video_available(
     
         _status)
 }

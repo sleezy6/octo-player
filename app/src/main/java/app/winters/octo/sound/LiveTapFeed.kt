@@ -14,6 +14,10 @@ const val TAP_RING_SAMPLES = 1 shl 18
 // How often the worker takes what the audio thread left for it.
 const val TAP_DRAIN_MS = 100L
 
+// How much of a song the tap must hear before its level counts, and after
+// which, once read, the tap has what it needs from the song.
+const val TAP_LEVEL_HEARD_MS = 20_000L
+
 // What a deck's LiveTap knows about the song it is playing: how much of it
 // has been heard, its body level, and its tempo when that is trusted.
 data class TapReading(val heardMs: Long, val bodyLevelDb: Double?, val tempoPrior: Double?)
@@ -23,6 +27,12 @@ data class TapReading(val heardMs: Long, val bodyLevelDb: Double?, val tempoPrio
 // takes them from there into the tap of the song they belong to. A new
 // song (or a new format) starts a new tap exactly where its first sample
 // is in the ring.
+//
+// The crossfade reads each song's tap a few seconds in, to plan its blend,
+// and again once the tap has heard enough for its level to count
+// (TAP_LEVEL_HEARD_MS). Once read with that much heard, the rest of the
+// song is not fed to the tap (its analysis would go unread); the next song
+// is.
 class LiveTapFeed(private val worker: ScheduledExecutorService = sharedWorker) {
     private val ring = FloatArray(TAP_RING_SAMPLES)
 
@@ -38,14 +48,21 @@ class LiveTapFeed(private val worker: ScheduledExecutorService = sharedWorker) {
     private var tapEntry: String? = null
     private var task: ScheduledFuture<*>? = null
 
+    // Songs begun so far, and the one whose tap was read (from then on its
+    // samples are left out).
+    @Volatile private var begun = 0
+    @Volatile private var readAt = -1
+
     // Audio thread: the samples from here on are the start of this song.
     fun begin(entryId: String?, sampleRate: Int, channels: Int) {
         starts += Start(written, entryId, sampleRate, channels)
+        begun++
         if (task == null) task = worker.scheduleWithFixedDelay(::drain, TAP_DRAIN_MS, TAP_DRAIN_MS, TimeUnit.MILLISECONDS)
     }
 
     // Audio thread: interleaved samples heard by the listener.
     fun push(samples: FloatArray, count: Int) {
+        if (readAt == begun) return
         val w = written
         if (count > TAP_RING_SAMPLES - (w - read)) return
         var at = (w and (TAP_RING_SAMPLES - 1).toLong()).toInt()
@@ -108,9 +125,13 @@ class LiveTapFeed(private val worker: ScheduledExecutorService = sharedWorker) {
     // it is not the song this deck is playing. `tagBpm`, the song's tag
     // tempo, picks the octave of the tempo heard.
     fun reading(entryId: String?, tagBpm: Double? = null): TapReading? = synchronized(lock) {
+        val songs = begun
         drain()
         val current = tap ?: return null
         if (tapEntry != entryId) return null
+        // Read with enough heard: no more of this song is fed in, unless
+        // another has begun in the meantime.
+        if (starts.isEmpty() && current.heardMs() >= TAP_LEVEL_HEARD_MS) readAt = songs
         TapReading(current.heardMs(), current.bodyLevelDb(), current.tempoPrior(tagBpm))
     }
 

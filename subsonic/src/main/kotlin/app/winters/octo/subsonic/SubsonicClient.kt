@@ -65,17 +65,6 @@ class SubsonicClient(
 
     // For the one call that can take minutes: Octo builds the stations the
     // first time they are asked for after it starts.
-    // How this server is reached for files it serves outside rest/ (an
-    // animated cover Octo relays): its headers added, to it alone.
-    val serverHttp: OkHttpClient get() = http
-
-    // A path the server gave relative to its own address (as rest/ is),
-    // made whole against the address in use, even one with a path.
-    fun resolve(path: String): HttpUrl? {
-        val base = baseUrl.let { if (it.encodedPath.endsWith("/")) it else it.newBuilder().addPathSegment("").build() }
-        return base.resolve(path)
-    }
-
     private val patient: OkHttpClient by lazy { this.http.newBuilder().readTimeout(3, TimeUnit.MINUTES).build() }
 
     // A signed address for an endpoint. Every call gets a fresh salt, so
@@ -280,7 +269,36 @@ class SubsonicClient(
         ).album
 
     suspend fun album(id: String): AlbumWithSongs =
-        get("getAlbum", mapOf("id" to id), "album", AlbumWithSongs.serializer())
+        get("getAlbum", mapOf("id" to id), "album", AlbumWithSongs.serializer()).let { album ->
+            val art = album.animatedArt ?: album.animatedArtwork?.asArt()
+            art?.let { album.copy(animatedArt = it.resolvedOn(baseUrl).takeUnless(AnimatedArt::isEmpty), animatedArtwork = null) } ?: album
+        }
+
+    // An album's animated art, on a server that lists octoAnimatedArt, with
+    // whole addresses. A server that never asked Apple about the album asks
+    // now, for up to 10 seconds, so this call may take that long.
+    // A server listing only the fork's octoAnimatedArtwork is asked through
+    // getAnimatedArtwork instead, its answer read the same way.
+    suspend fun animatedArt(albumId: String): AnimatedArtAnswer =
+        try {
+            val art = if (animatedArtwork) {
+                getOptional("getAnimatedArtwork", mapOf("id" to albumId), "animatedArtwork", AnimatedArtwork.serializer(), patient)?.asArt()
+            } else {
+                getOptional("getAnimatedArt", mapOf("id" to albumId), "animatedArt", AnimatedArt.serializer(), patient)
+            }?.resolvedOn(baseUrl)
+            if (art == null || art.isEmpty) AnimatedArtAnswer.None else AnimatedArtAnswer.Found(art)
+        } catch (e: SubsonicException) {
+            animatedArtAnswerFor(e)
+        }
+
+    // Whether animated art is asked through the fork's getAnimatedArtwork:
+    // set by whoever learns the server lists octoAnimatedArtwork and not
+    // octoAnimatedArt (see animatedArtworkOnly).
+    @Volatile var animatedArtwork: Boolean = false
+
+    // A whole address for one of an animated art clip's, which a server
+    // passing the clips on itself gives relative to its own address.
+    fun animatedArtUrl(address: String): HttpUrl? = resolveArtAddress(address, baseUrl)
 
     suspend fun artists(musicFolderId: String? = this.musicFolderId): List<ArtistIndex> =
         get(
@@ -681,8 +699,14 @@ class SubsonicClient(
     }
 
     // A call whose answer may leave its key out, or null: null then.
-    internal suspend fun <T> getOptional(endpoint: String, params: Map<String, String>, key: String, serializer: KSerializer<T>): T? {
-        val body = fetch(url(endpoint, params), endpoint)
+    internal suspend fun <T> getOptional(
+        endpoint: String,
+        params: Map<String, String>,
+        key: String,
+        serializer: KSerializer<T>,
+        http: OkHttpClient = this.http,
+    ): T? {
+        val body = fetch(url(endpoint, params), endpoint, http)
         return withContext(Dispatchers.Default) {
             val root = decode(body, null, kotlinx.serialization.json.JsonObject.serializer(), null)
             val payload = root[key]

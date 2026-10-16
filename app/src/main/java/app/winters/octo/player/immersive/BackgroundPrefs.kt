@@ -3,6 +3,7 @@ package app.winters.octo.player.immersive
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import app.winters.octo.player.PlayerColors
+import app.winters.octo.player.TitleIconAlpha
 import kotlinx.serialization.Serializable
 
 // What fills the full player behind the lyrics and controls.
@@ -30,6 +31,9 @@ data class BackgroundPrefs(
     val saturation: Int = 180,
     val contrast: Float = 1.3f,
     val useBpm: Boolean = true,
+    // The frame rate the background once offered as a setting. It always
+    // draws at WashMaxFps now; the value is still read from settings and
+    // backups made before, and otherwise left alone.
     val fps: Int = 60,
     // How fast it drifts, as a share of the full pace. Low by default, so it
     // reads as a slow ambience rather than an animation.
@@ -72,7 +76,16 @@ fun drawnRange(mode: BackgroundMode, colors: PlayerColors, prefs: BackgroundPref
 // The player's colours with the words' colour decided from what is drawn
 // behind them (`drawnRange`), and the background dimmed as far as they
 // need. Until the cover is ready, white words over the background as it is.
+//
+// The quieter icons are as strong as reading over the background's worst
+// part needs: its brightest under white words, its darkest under dark ones.
 fun PlayerColors.over(range: WashRange?): PlayerColors {
     val ink = range?.let { inkOver(it, base.toArgb()) } ?: WashInk(dark = false, show = 1f)
-    return copy(content = if (ink.dark) DarkInk else Color.White, show = ink.show)
+    val content = if (ink.dark) DarkInk else Color.White
+    val under = when {
+        range == null -> base.toArgb()
+        ink.dark -> range.low
+        else -> overlay(range.high, ink.show, base.toArgb())
+    }
+    return copy(content = content, show = ink.show, quiet = quietAlpha(under, content.toArgb(), TitleIconAlpha))
 }

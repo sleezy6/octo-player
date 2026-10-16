@@ -18,17 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.hoverable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.focus.onFocusChanged
-import app.winters.octo.desktop.motion.MotionCoverArt
-import app.winters.octo.desktop.motion.motionArtist
-import app.winters.octo.desktop.settings.MotionGrids
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import app.winters.octo.desktop.AppState
+import app.winters.octo.desktop.animated.rememberGridTile
 import app.winters.octo.discovery.albumShareLine
 import app.winters.octo.desktop.library.Cover
 import app.winters.octo.desktop.library.LibraryIndex
@@ -102,43 +93,21 @@ fun <T> Shelf(title: String, items: List<T>, key: (T) -> Any, card: @Composable 
 @Composable
 fun AlbumCard(app: AppState, album: Album, modifier: Modifier = Modifier, outside: Boolean = false, badge: @Composable (() -> Unit)? = null) {
     val pointer = LocalPointer.current
-    // The animated cover, where the album has one and grids show them: the
-    // tile under the pointer or the keyboard, or every tile in sight.
-    val motion by app.motionCovers.prefs.collectAsState()
-    val grids = if (motion.enabled) motion.grids else MotionGrids.Off
-    val hover = remember { MutableInteractionSource() }
-    val hovered by hover.collectIsHoveredAsState()
-    var focused by remember { mutableStateOf(false) }
+    // The fork's animated covers in album grids.
+    val tile = rememberGridTile(app, album.id, album.coverArt, outside, modifier)
     MediaCard(
         album.name,
         listOfNotNull(album.displayArtist ?: album.artist.takeIf(String::isNotEmpty), album.year?.takeIf { it > 0 }?.toString()).joinToString(" · ").ifEmpty { null },
         album.coverArt,
         onOpen = { app.navigator.go(Page.Album(album.id)) },
-        modifier = if (grids == MotionGrids.Hover) modifier.hoverable(hover).onFocusChanged { focused = it.hasFocus } else modifier,
+        modifier = tile.modifier,
         online = outside,
         onMenu = { app.popups.showAt(pointer.point) { close -> AlbumMenu(app, album, close, outside) } },
         badge = badge,
-        picture = if (grids == MotionGrids.Off) null else { { picture, shape ->
-            MotionCoverArt(
-                album.coverArt,
-                album.id,
-                album.motionArtist(),
-                album.name,
-                picture,
-                shape = shape,
-                online = outside,
-                playing = grids == MotionGrids.Always || hovered || focused,
-                settleMs = if (grids == MotionGrids.Always) GridSettleMs else HoverSettleMs,
-            )
-        } },
+        picture = tile.picture,
         note = albumShareLine(album),
     )
 }
-
-// How long a tile is pointed at, or in sight, before its animated cover is
-// asked for: long enough that sweeping or scrolling past asks for nothing.
-private const val HoverSettleMs = 250L
-private const val GridSettleMs = 600L
 
 // The top of a page that plays a list: the picture, what it is, its name,
 // a line of details, and Play and Shuffle as two glass capsules. Laid out

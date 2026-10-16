@@ -1,6 +1,9 @@
 package app.winters.octo.player.immersive
 
+import app.winters.octo.player.MESH_FULL_FPS
+import app.winters.octo.player.PlayerPrefs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class BackgroundPrefsTest {
@@ -35,6 +38,33 @@ class BackgroundPrefsTest {
         assertEquals(BackgroundMode.Artwork, drawnMode(BackgroundMode.Default, 29))
         assertEquals(BackgroundMode.Classic, drawnMode(BackgroundMode.Classic, 29))
         assertEquals(BackgroundMode.Colour, drawnMode(BackgroundMode.Colour, 29))
+    }
+
+    @Test
+    fun aMovingBackgroundNamesItsFrameLimit() {
+        val wash = PlayerPrefs(background = BackgroundPrefs(fps = 30))
+        // The wash moves playing or not, at its own limit.
+        assertEquals(30, movingBackgroundFps(wash, 33, playing = true))
+        assertEquals(30, movingBackgroundFps(wash, 33, playing = false))
+        // Faster limits draw at 30, all the slow drift needs.
+        assertEquals(30, movingBackgroundFps(PlayerPrefs(background = BackgroundPrefs(fps = 120)), 33, playing = true))
+        // Older phones show the still artwork instead.
+        assertNull(movingBackgroundFps(wash, 32, playing = true))
+        assertNull(movingBackgroundFps(wash.copy(liveBackground = false), 33, playing = true))
+        // The classic mesh at its full rate while music plays only.
+        val mesh = PlayerPrefs(background = BackgroundPrefs(mode = BackgroundMode.Classic))
+        assertEquals(MESH_FULL_FPS, movingBackgroundFps(mesh, 33, playing = true))
+        assertNull(movingBackgroundFps(mesh, 33, playing = false))
+        assertNull(movingBackgroundFps(mesh, 32, playing = true))
+        assertNull(movingBackgroundFps(PlayerPrefs(background = BackgroundPrefs(mode = BackgroundMode.Colour)), 33, playing = true))
+    }
+
+    @Test
+    fun theWashDrawsAtThirtyWhateverAnOldSettingSays() {
+        assertEquals(30, WashMaxFps)
+        assertEquals(30, movingBackgroundFps(PlayerPrefs(background = BackgroundPrefs(fps = 90)), 33, playing = true))
+        // An old saved rate still reads back.
+        assertEquals(90, BackgroundPrefs(fps = 90).sane().fps)
     }
 
     @Test

@@ -42,7 +42,7 @@ import kotlinx.coroutines.launch
 
 private val StrengthChoices = mapOf(
     AmbientStrength.Off to Choice("Off", "The plain dark background everywhere."),
-    AmbientStrength.Subtle to Choice("Subtle", "A faint glow of the artwork's colours behind the pages."),
+    AmbientStrength.Subtle to Choice("Subtle", "A faint glow of the artwork's colors behind the pages."),
     AmbientStrength.Rich to Choice("Rich", "A fuller glow, still kept dark enough for text."),
 )
 
@@ -66,8 +66,8 @@ class MotionViewModel @Inject constructor(private val settings: PlayerSettings) 
     }
 }
 
-// How the app looks: the artwork's colours glowing behind the pages, how
-// strongly and where, Home's sections, the player's background, and how
+// How the app looks: the accent, the artwork's colours glowing behind the
+// pages, how strongly and where, Home's sections, the player's background, and how
 // much moves.
 @Composable
 fun AppearancePage(
@@ -86,6 +86,10 @@ fun AppearancePage(
     val sheet = LocalChoiceSheet.current
 
     SettingsPageFrame("Appearance", onBack, highlight) {
+        SettingsGroup {
+            AccentPicker()
+            GlassTintRow()
+        }
         AmbientPreview(prefs.strength, Modifier.padding(horizontal = 16.dp))
         SettingsGroup {
             ChoiceRow(SettingsIndex.Ambient, value = StrengthChoices.getValue(prefs.strength).label, onClick = {
@@ -107,7 +111,7 @@ fun AppearancePage(
                 )
                 SwitchRow(SettingsIndex.AmbientSearch, prefs.search, { vm.setArea(AmbientArea.Search, it) })
                 SwitchRow(SettingsIndex.AmbientSettings, prefs.settings, { vm.setArea(AmbientArea.Settings, it) })
-                SwitchRow(SettingsIndex.AmbientBar, prefs.bar, vm::setBar, helper = "A trace of the song's colour in its glass.")
+                SwitchRow(SettingsIndex.AmbientBar, prefs.bar, vm::setBar, helper = "A trace of the song's color in its glass.")
                 SwitchRow(
                     SettingsIndex.AmbientPageArtwork,
                     prefs.pageArtwork,

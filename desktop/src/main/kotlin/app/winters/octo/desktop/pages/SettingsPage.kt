@@ -46,9 +46,6 @@ import app.winters.octo.server.serverOffers
 import app.winters.octo.desktop.setAutoplay
 import app.winters.octo.desktop.settings.AmbienceMotion
 import app.winters.octo.covers.PLAYLIST_COVERS_SETTING
-import app.winters.octo.radio.RadioAdventure
-import app.winters.octo.radio.RadioDiscovery
-import app.winters.octo.radio.RadioVariety
 import app.winters.octo.covers.PlaylistCoverStyle
 import app.winters.octo.covers.playlistCoverStyleHelp
 import app.winters.octo.covers.playlistCoverStyleName
@@ -66,12 +63,18 @@ import app.winters.octo.design.OctoIcons
 import app.winters.octo.desktop.hotkeys.GlobalShortcutGroup
 import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import app.winters.octo.ui.family.AUDIO_QUALITY
+import app.winters.octo.animated.AnimatedArtSetting
+import app.winters.octo.desktop.settings.animatedArtSetting
+import app.winters.octo.desktop.settings.AnimatedGrids
 import kotlin.math.roundToInt
 
-// Settings: the servers, how Octo looks, playback, listening, lyrics,
+// Settings: the servers, how Octo looks, playback, listening, lyrics, radio,
 // Discord, how it fits into the system, the keyboard shortcuts and the
 // version, each a section of its own in the list beside the page. Every
 // change is saved at once.
+
+// The Radio section's key, for a link straight to it.
+const val RADIO_SECTION = "radio"
 @Composable
 fun SettingsPage(app: AppState, visit: Visit) {
     val settings by app.settings.state.collectAsState()
@@ -88,7 +91,7 @@ fun SettingsPage(app: AppState, visit: Visit) {
             PageSection("offline", "Offline", OctoIcons.Download, detail = "Songs kept here to play without a connection.") { OfflineRows(app, settings) },
             PageSection("listening", "Listening", OctoIcons.Headphones) { ListeningRows(app, settings) },
             PageSection("lyrics", "Lyrics", OctoIcons.Lyrics) { LyricsRows(app, settings) },
-            PageSection("stations", "Radio stations", OctoIcons.Radio, detail = "Live stations on your server, and near you.") { RadioStationRows(app) },
+            PageSection(RADIO_SECTION, "Radio", OctoIcons.Radio, detail = "Song radio from your music, and live radio on the air.") { RadioRows(app, settings) },
             if (discord) PageSection("discord", "Discord", DiscordMark, detail = "Show what you're playing to your friends.", brand = true) { DiscordRows(app) } else null,
             PageSection("system", "System", OctoIcons.System) {
                 SystemRows(app)
@@ -108,8 +111,8 @@ fun SettingsPage(app: AppState, visit: Visit) {
 internal fun serverOffers(connection: Connection): String? =
     serverOffers(lyrics = connection.lyricsByIdOn || connection.supports(OCTO_LYRICS), adds = connection.acquires)
 
-// The window's background, Home's sections, the full player's background,
-// then how much moves.
+// The accent, the window's background, Home's sections, the full player's
+// background, then how much moves.
 // Each tuning line shows only while it has something to change.
 @Composable
 private fun AppearanceGroups(app: AppState, settings: AppSettings) {
@@ -117,6 +120,9 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
     fun appearance(edit: (Appearance) -> Appearance) = app.settings.update { it.copy(appearance = edit(it.appearance)) }
     fun wash(edit: (WashPrefs) -> WashPrefs) = appearance { it.copy(wash = edit(it.wash)) }
     val chosen = ambienceOf(look)
+    Group {
+        AccentRow(look.accent) { accent -> appearance { it.copy(accent = accent) } }
+    }
     Group("Window background") {
         ChoiceRow("Ambience", ambienceHelp(chosen), listOf(null, AmbienceStyle.Glow, AmbienceStyle.Immersive), chosen, ::ambienceName) { style ->
             appearance { withAmbience(it, style) }
@@ -139,7 +145,21 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
     }
     HomeSectionsGroup(app, look.homeSections)
     Group("Full player") {
-        SwitchRow("Moving background", "Off holds the colours still, easier on a battery.", look.wash.moving) { on ->
+        val animated = look.animatedArtSetting
+        val animatedHelp = when {
+            animated == AnimatedArtSetting.Off -> animated.about
+            LocalReduceMotion.current -> "Shows the still cover while motion is reduced, by Calm motion or your system."
+            else -> animated.about
+        }
+        ChoiceRow(AnimatedArtSetting.TITLE, animatedHelp, AnimatedArtSetting.entries, animated, AnimatedArtSetting::label) { choice ->
+            appearance { it.copy(animatedArt = choice.key) }
+        }
+        if (animated != AnimatedArtSetting.Off) {
+            ChoiceRow("In album grids", gridsHelp(look.animatedGrids), AnimatedGrids.entries, look.animatedGrids, ::gridsName) { grids ->
+                appearance { it.copy(animatedGrids = grids) }
+            }
+        }
+        SwitchRow("Moving background", "Off holds the colors still, easier on a battery.", look.wash.moving) { on ->
             wash { it.copy(moving = on) }
         }
         if (look.wash.moving && !look.calmMotion) {
@@ -154,7 +174,6 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
             wash { it.copy(brightnessCap = (20 + x * 80).roundToInt()) }
         }, live = false)
     }
-    MotionCoverGroup(app, settings)
     Group("Playlists") {
         ChoiceRow(PLAYLIST_COVERS_SETTING, playlistCoverStyleHelp(look.playlistCovers), PlaylistCoverStyle.entries, look.playlistCovers, ::playlistCoverStyleName) { style ->
             appearance { it.copy(playlistCovers = style) }
@@ -191,7 +210,7 @@ internal fun withAmbience(look: Appearance, style: AmbienceStyle?): Appearance =
 @Composable
 private fun PlaybackRows(app: AppState, settings: AppSettings) {
     Rows {
-        SwitchRow("Autoplay", "When the queue ends, similar songs keep playing.", settings.playback.autoplay) { on ->
+        SwitchRow("Autoplay", "When the queue ends, similar songs keep playing, picked as Radio settings say.", settings.playback.autoplay) { on ->
             app.setAutoplay(on)
         }
         ChoiceRow(START_AFTER_SETTING, START_AFTER_HELP, StartAfter.entries, settings.playback.startAfter, { it.label }) { wait ->
@@ -199,21 +218,6 @@ private fun PlaybackRows(app: AppState, settings: AppSettings) {
         }
         SwitchRow(LIBRARY_ONLY_SETTING, LIBRARY_ONLY_HELP, settings.libraryOnly) { on -> app.setLibraryOnly(on) }
         ActionRow("Equalizer, loudness, crossfade and speed", null, "Open Sound", { app.navigator.go(Page.Sound) })
-    }
-    val playback = settings.playback
-    Group("Radio") {
-        ChoiceRow("Discovery", playback.radioDiscovery.detail, RadioDiscovery.entries, playback.radioDiscovery, { it.label }) { d ->
-            app.settings.update { it.copy(playback = it.playback.copy(radioDiscovery = d)) }
-        }
-        ChoiceRow("Adventure", playback.radioAdventure.detail, RadioAdventure.entries, playback.radioAdventure, { it.label }) { a ->
-            app.settings.update { it.copy(playback = it.playback.copy(radioAdventure = a)) }
-        }
-        ChoiceRow("Artist variety", playback.radioVariety.detail, RadioVariety.entries, playback.radioVariety, { it.label }) { v ->
-            app.settings.update { it.copy(playback = it.playback.copy(radioVariety = v)) }
-        }
-        SwitchRow("Favorites more often", "Songs you hearted or rated 4 or 5 stars come around more often.", playback.radioFavorites) { on ->
-            app.settings.update { it.copy(playback = it.playback.copy(radioFavorites = on)) }
-        }
     }
 }
 
@@ -306,8 +310,8 @@ private fun ambienceName(style: AmbienceStyle?): String = when (style) {
 // When each ambience choice is the one to pick.
 private fun ambienceHelp(style: AmbienceStyle?): String = when (style) {
     null -> "The plain dark background."
-    AmbienceStyle.Glow -> "The song's colours glow across the top of the window."
-    AmbienceStyle.Immersive -> "The cover's colours behind the whole window."
+    AmbienceStyle.Glow -> "The song's colors glow across the top of the window."
+    AmbienceStyle.Immersive -> "The cover's colors behind the whole window."
 }
 
 private fun motionName(motion: AmbienceMotion): String = when (motion) {
@@ -326,3 +330,15 @@ private fun motionHelp(motion: AmbienceMotion): String = when (motion) {
 // The version the build stamped, or "Development build" when run from source
 // without it.
 fun appVersion(): String = System.getProperty("octo.version")?.takeIf(String::isNotBlank) ?: "Development build"
+
+private fun gridsName(grids: AnimatedGrids): String = when (grids) {
+    AnimatedGrids.Off -> "Off"
+    AnimatedGrids.Hover -> "On hover"
+    AnimatedGrids.Always -> "Always"
+}
+
+private fun gridsHelp(grids: AnimatedGrids): String = when (grids) {
+    AnimatedGrids.Off -> "Album grids keep still covers."
+    AnimatedGrids.Hover -> "The album under the pointer moves."
+    AnimatedGrids.Always -> "Every album in sight moves. Uses more power and downloads more."
+}

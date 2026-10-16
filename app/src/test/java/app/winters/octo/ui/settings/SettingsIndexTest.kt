@@ -51,6 +51,24 @@ class SettingsIndexTest {
     }
 
     @Test
+    fun searchFindsTheAccentColor() {
+        assertEquals("Accent color", titles("accent").first())
+        assertTrue("Accent color" in titles("theme"))
+        assertTrue("Accent color" in titles("colour"))
+        assertEquals(SettingsPage.Appearance, SettingsIndex.AccentColor.page)
+    }
+
+    @Test
+    fun animatedArtIsFoundUnderItsOwnWords() {
+        assertEquals("Animated art", titles("animated art").first())
+        assertTrue("Animated art" in titles("video cover"))
+        assertEquals(SettingsPage.Appearance, SettingsIndex.AnimatedArt.page)
+        // Its words never call it moving.
+        val words = listOf(SettingsIndex.AnimatedArt.title, SettingsIndex.AnimatedArt.summary) + SettingsIndex.AnimatedArt.keywords
+        assertTrue(words.none { it.contains("moving", ignoreCase = true) || it.contains("motion", ignoreCase = true) })
+    }
+
+    @Test
     fun punctuationAndAccentsDoNotMatter() {
         assertTrue("Streaming on Wi-Fi" in titles("wifi"))
         assertTrue("What's new" in titles("whats new"))
@@ -79,6 +97,20 @@ class SettingsIndexTest {
         assertEquals("Home sections", titles("rearrange").first())
         assertEquals("Home sections", titles("edit home").first())
         assertEquals("Appearance · Home", SettingsIndex.HomeSections.place)
+    }
+
+    @Test
+    fun songRadioAndLiveRadioAreFoundApartByTheirWords() {
+        // Song radio, mixed from your music.
+        assertEquals(listOf("Discovery", "Adventure", "Artist variety", "Favorites more often"), titles("song radio").take(4))
+        assertEquals("Radio · Song radio", SettingsIndex.RadioDiscovery.place)
+        // Live radio, the stations on the air.
+        assertEquals(listOf("Find stations near you", "Stations on your server"), titles("live radio").take(2))
+        assertEquals("Radio · Live radio", SettingsIndex.RadioStations.place)
+        assertTrue("Find stations near you" in titles("fm"))
+        assertTrue("Stations on your server" in titles("internet radio"))
+        // Radio alone finds both parts.
+        assertTrue(titles("radio").containsAll(listOf("Discovery", "Find stations near you", "Stations on your server")))
     }
 
     @Test

@@ -1,5 +1,6 @@
 package app.winters.octo.desktop.settings
 
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.offline.KeepChoices
 import app.winters.octo.playback.FadeCurve
 import app.winters.octo.playback.StartAfter
@@ -17,6 +18,7 @@ import app.winters.octo.server.serverName
 import app.winters.octo.server.settleServers
 import app.winters.octo.subsonic.AuthMode
 import app.winters.octo.update.UpdatePrefs
+import app.winters.octo.theme.AccentChoice
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.SerialName
@@ -301,25 +303,23 @@ data class Appearance(
     // Home's shelves in order, a hidden one led by "-", as the phone keeps
     // them; null for the usual order, all shown.
     @SerialName(HOME_SECTIONS_KEY) val homeSections: String? = null,
-    // Apple Music's moving covers in place of still ones, where an album
-    // has one (off unless asked).
-    val motionCovers: MotionCoverPrefs = MotionCoverPrefs(),
-)
-
-// Animated covers: whether they show. The signed-in Octo server finds them
-// (octoAnimatedArtwork); off, or with a server that does not offer them,
-// nothing is asked. (An artwork server's address, kept here before, is
-// read past.)
-@Serializable
-data class MotionCoverPrefs(
-    val enabled: Boolean = false,
-    // Album grids (Albums, an artist's albums, Home's shelves): still, the
-    // tile under the pointer moving, or every tile in sight moving.
-    val grids: MotionGrids = MotionGrids.Hover,
+    // The accent the app is drawn in, or the playing cover's.
+    val accent: AccentChoice = AccentChoice.Octo,
+    // Animated album covers on Octo servers that offer them: "square" in
+    // place of the cover, "full_screen" behind the player, or "off"
+    // (AnimatedArtSetting's keys; anything else reads as the default).
+    @SerialName(AnimatedArtSetting.PREF_KEY) val animatedArt: String = AnimatedArtSetting.Default.key,
+    // The fork's album grids (Albums, an artist's albums, Home's shelves):
+    // still covers, the tile under the pointer moving, or every tile in
+    // sight moving. Only while Animated art is on.
+    val animatedGrids: AnimatedGrids = AnimatedGrids.Hover,
 )
 
 @Serializable
-enum class MotionGrids { Off, Hover, Always }
+enum class AnimatedGrids { Off, Hover, Always }
+
+// The Animated art choice.
+val Appearance.animatedArtSetting: AnimatedArtSetting get() = AnimatedArtSetting.fromKey(animatedArt)
 
 // The window's colours: the playing cover blurred into a glow across the
 // top, or the full player's moving wash of it behind the whole window.

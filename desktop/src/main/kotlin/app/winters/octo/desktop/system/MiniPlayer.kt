@@ -1,8 +1,9 @@
 package app.winters.octo.desktop.system
 
-import app.winters.octo.desktop.motion.LocalMotionCovers
-import app.winters.octo.desktop.motion.MotionCoverArt
-import app.winters.octo.desktop.motion.motionArtist
+import app.winters.octo.desktop.animated.MiniPlayerCover
+
+import app.winters.octo.desktop.window.appTextPixels
+import app.winters.octo.desktop.window.useTextPixels
 import app.winters.octo.desktop.ui.MarkedTitle
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -36,12 +37,21 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import app.winters.octo.desktop.searchFor
+import app.winters.octo.desktop.ui.windowRect
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import app.winters.octo.desktop.ui.OnTitleCapitals
+import app.winters.octo.desktop.ui.TitleIconAlpha
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -97,6 +107,8 @@ import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.WindowSpot
 import app.winters.octo.desktop.ui.ImmersiveBackdrop
 import app.winters.octo.desktop.ui.PlayButton
+import app.winters.octo.desktop.ui.PlayScale
+import app.winters.octo.desktop.ui.PlayTarget
 import app.winters.octo.desktop.ui.LiveCover
 import app.winters.octo.desktop.ui.OnAirButton
 import app.winters.octo.desktop.ui.LiveLine
@@ -109,6 +121,8 @@ import app.winters.octo.desktop.ui.rememberPosition
 import app.winters.octo.desktop.window.Frame
 import app.winters.octo.desktop.window.ResizeEdges
 import app.winters.octo.desktop.window.roundWindowsCorners
+import app.winters.octo.desktop.window.systemRoundsWindows
+import androidx.compose.ui.graphics.RectangleShape
 import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.player.immersive.WashTuning
 import app.winters.octo.desktop.player.wash.WashCover
@@ -119,6 +133,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 import java.awt.Dimension
+import java.awt.event.HierarchyEvent
+import java.awt.event.HierarchyListener
+import androidx.compose.runtime.DisposableEffect
 
 // What the mini player's own buttons ask of the app.
 class MiniActions(
@@ -130,6 +147,9 @@ class MiniActions(
     val showPanel: (MiniPanel?) -> Unit,
     // Close it and go back to Octo's window.
     val close: () -> Unit,
+    // A station's More menu, under the button whose bounds in this window
+    // are given, in pixels.
+    val more: (IntRect) -> Unit = {},
 )
 
 // A small window of its own that stays above the others (unless Settings
@@ -164,13 +184,30 @@ fun MiniPlayerWindow(
         windowState.size = DpSize(to.width.dp, to.height.dp)
     }
     // A word on what the pin did, for a moment, since pinning changes
-    // nothing to be seen until the listener tries to move it.
+    // nothing to be seen until the listener tries to move it, or on what a
+    // row of the station menu did.
     var pinNote by remember { mutableStateOf<String?>(null) }
+    // A station's More menu, open under its button, in screen units.
+    var liveMenu by remember { mutableStateOf<MiniMenuAnchor?>(null) }
+    var density by remember { mutableStateOf(1f) }
     var pinClicks by remember { mutableIntStateOf(0) }
     LaunchedEffect(pinClicks) {
         if (pinClicks == 0) return@LaunchedEffect
         delay(PIN_NOTE_MS)
         pinNote = null
+    }
+    // Octo's own window is hidden behind the mini player, so what the
+    // station menu's rows did (kept, removed, copied, added to the server,
+    // or why not) is said here: any notice that comes while the menu is
+    // open or soon after it closes.
+    var echoUntil by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { app.notice }.collect { line ->
+            if (line != null && (liveMenu != null || System.currentTimeMillis() < echoUntil)) {
+                pinNote = line
+                pinClicks++
+            }
+        }
     }
     val actions = MiniActions(
         pin = {
@@ -185,16 +222,48 @@ fun MiniPlayerWindow(
             if (panel != null) miniSizeForPanel(here()).let { (w, h) -> if (w != windowState.size.width.value || h != windowState.size.height.value) jumpTo(w, h) }
         },
         close = onClose,
+        more = { rect ->
+            val at = windowState.position
+            if (at is WindowPosition.Absolute) {
+                liveMenu = MiniMenuAnchor(at.x.value + rect.left / density, at.y.value + rect.top / density, at.y.value + rect.bottom / density)
+            }
+        },
     )
+    val playing by app.player.state.collectAsState()
+    val menuFor = liveMenu
+    val live = playing.live
+    if (menuFor != null && live != null) {
+        MiniLiveMenu(
+            app,
+            live,
+            playing.current?.song?.id.orEmpty(),
+            menuFor,
+            onTop = prefs.miniPlayerOnTop,
+            reduceMotion = reduceMotion,
+            find = { query ->
+                liveMenu = null
+                onClose()
+                app.searchFor(query)
+            },
+            close = {
+                liveMenu = null
+                echoUntil = System.currentTimeMillis() + MENU_ECHO_MS
+            },
+        )
+    }
+    // The station went: so does its menu.
+    LaunchedEffect(live == null) { if (live == null) liveMenu = null }
+    val systemRounds = remember(os) { systemRoundsWindows(os) }
     Window(
         onCloseRequest = onClose,
         state = windowState,
         title = "Octo mini player",
         icon = icon,
         undecorated = true,
-        // See-through corners where the system draws them well; Windows 11
-        // rounds the frameless window itself.
-        transparent = os == DesktopOs.Mac,
+        // Windows 11 rounds the frameless window itself, with its own edge
+        // and shadow, so the face fills it square; elsewhere the window is
+        // see-through round the face's rounded shape.
+        transparent = !systemRounds,
         alwaysOnTop = prefs.miniPlayerOnTop,
         resizable = !prefs.miniPlayerPinned,
         onPreviewKeyEvent = { event ->
@@ -217,11 +286,27 @@ fun MiniPlayerWindow(
             }
         },
     ) {
+        // Colour text needs a window drawn whole; a see-through one stays grey.
+        remember { useTextPixels(window, if (systemRounds) appTextPixels else null) }
         val frame = remember { Frame(window, windowState) }
+        density = LocalDensity.current.density
         LaunchedEffect(Unit) {
             window.minimumSize = Dimension(MINI_MIN_WIDTH.toInt(), MINI_MIN_HEIGHT.toInt())
             window.maximumSize = Dimension(MINI_MAX_WIDTH.toInt(), MINI_MAX_HEIGHT.toInt())
-            if (os == DesktopOs.Windows) roundWindowsCorners(window)
+            // Its icons for Alt+Tab and the taskbar, each size drawn from the vector.
+            if (icon == null) window.iconImages = withContext(Dispatchers.Default) { OctopusArt.windowIcons() }
+        }
+        // Asked again whenever the window's style can change (pinned, kept
+        // on top) or its native window is made again, which drops the ask.
+        if (systemRounds) {
+            LaunchedEffect(prefs.miniPlayerPinned, prefs.miniPlayerOnTop) { roundWindowsCorners(window) }
+            DisposableEffect(window) {
+                val again = HierarchyListener { event ->
+                    if (event.changeFlags and HierarchyEvent.DISPLAYABILITY_CHANGED.toLong() != 0L && window.isDisplayable) roundWindowsCorners(window)
+                }
+                window.addHierarchyListener(again)
+                onDispose { window.removeHierarchyListener(again) }
+            }
         }
         LaunchedEffect(Unit) {
             snapshotFlow { windowState.position to windowState.size }
@@ -231,7 +316,7 @@ fun MiniPlayerWindow(
                 }
         }
         ProvideWindowLook(reduceMotion = reduceMotion, focus = keyboard) {
-            CompositionLocalProvider(LocalCovers provides app.connection?.client, LocalMotionCovers provides app.motionCovers) {
+            CompositionLocalProvider(LocalCovers provides app.connection?.client) {
                 Box(Modifier.fillMaxSize()) {
                     MiniPlayerView(
                         app,
@@ -239,6 +324,7 @@ fun MiniPlayerWindow(
                         pinned = prefs.miniPlayerPinned,
                         actions = actions,
                         note = pinNote,
+                        shape = if (systemRounds) RectangleShape else MenuShape,
                         dragArea = { modifier -> if (!prefs.miniPlayerPinned) WindowDraggableArea(modifier) {} },
                     )
                     if (!prefs.miniPlayerPinned) ResizeEdges(frame, thickness = Space.Xs)
@@ -262,12 +348,14 @@ fun MiniPlayerView(
     actions: MiniActions,
     // A short line over the bottom of it, for a moment, if any.
     note: String? = null,
+    // The face's outline: rounded, unless the system rounds the window.
+    shape: Shape = MenuShape,
     dragArea: @Composable (Modifier) -> Unit,
 ) {
     val state by app.player.state.collectAsState()
-    Box(Modifier.fillMaxSize().background(OctoColors.Background, MenuShape)) {
+    Box(Modifier.fillMaxSize().background(OctoColors.Background, shape)) {
         MiniBackdrop(app, state, Modifier.matchParentSize())
-        Box(Modifier.matchParentSize().background(MenuFilm, MenuShape))
+        Box(Modifier.matchParentSize().background(MenuFilm, shape))
         dragArea(Modifier.matchParentSize())
         BoxWithConstraints(Modifier.fillMaxSize()) {
             when (miniShapeFor(maxHeight.value, panel)) {
@@ -277,12 +365,16 @@ fun MiniPlayerView(
             }
         }
         if (note != null) MiniNote(note, Modifier.align(Alignment.BottomCenter))
-        Box(Modifier.matchParentSize().border(FrameSize.Hairline, ChromeEdge, MenuShape))
+        Box(Modifier.matchParentSize().border(FrameSize.Hairline, ChromeEdge, shape))
     }
 }
 
 // How long the pin's word stays.
 private const val PIN_NOTE_MS = 2_400L
+
+// How long after the station menu closes its rows' notices still show here:
+// adding a station to the server answers once the server has.
+private const val MENU_ECHO_MS = 15_000L
 
 // What the pin did, in words.
 fun pinNoteFor(pinned: Boolean): String = if (pinned) "Pinned in place" else "Unpinned. Drag it anywhere"
@@ -343,6 +435,7 @@ private fun MiniBar(app: AppState, state: PlayerState, pinned: Boolean, actions:
                 Transport(app, state)
                 Progress(app, state, Modifier.weight(1f).padding(horizontal = Space.Xs), times = wide)
                 Heart(app, state)
+                LiveMore(state, actions)
                 VolumeButton(app, state.volume)
             }
         }
@@ -365,9 +458,16 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, pinn
                 Box(Modifier.align(Alignment.TopEnd).padding(Space.Xs)) { WindowButtons(pinned, bar = false, actions) }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        // The heart (and a station's More) on the middle of the title's
+        // capitals, a step quieter than it.
+        Row(verticalAlignment = Alignment.Top) {
             SongWords(state, Modifier.weight(1f))
-            Heart(app, state)
+            OnTitleCapitals(DesktopType.emphasis) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Heart(app, state, quiet = TitleIconAlpha)
+                    LiveMore(state, actions, quiet = TitleIconAlpha)
+                }
+            }
         }
         Progress(app, state, Modifier.fillMaxWidth(), times = true)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -397,6 +497,7 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, p
         Row(Modifier.fillMaxWidth().padding(vertical = Space.Xs), verticalAlignment = Alignment.CenterVertically) {
             if (state.live == null) PanelButton(MiniPanel.Lyrics, panel, actions)
             Heart(app, state)
+            LiveMore(state, actions)
             Spacer(Modifier.weight(1f))
             Transport(app, state)
             Spacer(Modifier.weight(1f))
@@ -416,15 +517,15 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, p
 
 private val TopShade = Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent))
 
-// The playing song's cover, or a station's picture. `moving`: the song's
-// animated cover where its album has one (the large cover only).
+// The playing song's cover, or a station's picture. `moving` (the fork's,
+// the large cover only): the album's animated loop over it, if any.
 @Composable
 private fun MiniArt(app: AppState, state: PlayerState, modifier: Modifier, shape: Shape, small: Boolean = false, moving: Boolean = false) {
     val live = state.live
     val song = state.current?.song
     when {
         live != null -> LiveCover(app, live, modifier, shape, small = small)
-        moving -> MotionCoverArt(song?.coverArt, song?.albumId, song?.motionArtist(), song?.album, modifier, shape = shape, placeholder = OctoIcons.Songs, retry = true)
+        moving -> MiniPlayerCover(app, song?.albumId, song?.coverArt, seen = true, shape = shape, modifier = modifier)
         else -> Cover(song?.coverArt, modifier, shape = shape, placeholder = OctoIcons.Songs, retry = true)
     }
 }
@@ -467,10 +568,10 @@ private fun WindowButtons(pinned: Boolean, bar: Boolean, actions: MiniActions) {
 @Composable
 private fun Transport(app: AppState, state: PlayerState) {
     val song = state.current?.song
-    state.live?.let { live -> return LiveTransport(app, state, live, playSize = FrameSize.PlayButton, stepSize = ControlHeight.S, stepIcon = IconSize.Toolbar, tint = OctoColors.TextPrimary, gap = Space.Xxs) }
+    state.live?.let { live -> return LiveTransport(app, state, live, playSize = PlayTarget, stepSize = ControlHeight.S, stepIcon = IconSize.Toolbar, tint = OctoColors.TextPrimary, gap = Space.Xxs) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.Xxs)) {
         IconAction(OctoIcons.Previous, "Previous", app.player::previous, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = song != null)
-        PlayButton(state.playing, enabled = song != null, size = FrameSize.PlayButton, waiting = state.buffering) { app.player.togglePlay() }
+        PlayButton(state.playing, enabled = song != null, size = PlayTarget, glyph = IconSize.Toolbar * PlayScale, waiting = state.buffering) { app.player.togglePlay() }
         IconAction(OctoIcons.Next, "Next", app.player::next, size = ControlHeight.S, iconSize = IconSize.Toolbar, enabled = song != null)
     }
 }
@@ -480,14 +581,15 @@ private fun Transport(app: AppState, state: PlayerState) {
 @Composable
 private fun Progress(app: AppState, state: PlayerState, modifier: Modifier, times: Boolean) {
     if (state.live != null) return LiveLine(app, OctoColors.TextPrimary, OctoColors.TextMuted, modifier, times = times)
-    val position by rememberPosition(app.player)
+    var lineLength by remember { mutableFloatStateOf(0f) }
+    val position by rememberPosition(app.player, lineLength)
     val duration = state.durationMs
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.S)) {
         if (times) Txt(lengthText((position / 1000).toInt()).ifEmpty { "0:00" }, TimeStyle, OctoColors.TextMuted, Modifier.width(TimeWidth))
         LineSlider(
             fraction = { if (duration > 0) position.toFloat() / duration else 0f },
             onSeek = { app.player.seekTo((it * duration).toLong()) },
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1f).onSizeChanged { lineLength = it.width.toFloat() },
             hoverLabel = { lengthText((it * duration / 1000).toInt()).ifEmpty { "0:00" } },
         )
         if (times) Txt(lengthText((duration / 1000).toInt()).ifEmpty { "0:00" }, TimeStyle, OctoColors.TextMuted, Modifier.width(TimeWidth), align = TextAlign.End)
@@ -497,14 +599,33 @@ private fun Progress(app: AppState, state: PlayerState, modifier: Modifier, time
 private val TimeStyle = DesktopType.meta.copy(fontFeatureSettings = "tnum")
 private val TimeWidth: Dp = Space.Wide
 
-// The heart, for a song in the library.
+// A station's More button: its menu opens in a window of its own. `quiet`
+// is how strongly its dots show.
 @Composable
-private fun Heart(app: AppState, state: PlayerState) {
+private fun LiveMore(state: PlayerState, actions: MiniActions, quiet: Float = 1f) {
+    if (state.live == null) return
+    var anchor by remember { mutableStateOf(IntRect.Zero) }
+    Box(Modifier.onGloballyPositioned { anchor = it.windowRect() }) {
+        IconAction(OctoIcons.More, "More", { actions.more(anchor) }, size = ControlHeight.S, iconSize = IconSize.Toolbar, tint = OctoColors.TextPrimary.copy(alpha = quiet))
+    }
+}
+
+// The heart, for a song in the library. `quiet` is how strongly it shows
+// until it is filled.
+@Composable
+private fun Heart(app: AppState, state: PlayerState, quiet: Float = 1f) {
     val song = state.current?.song ?: return
-    state.live?.let { live -> return OnAirButton(app, live, ControlHeight.S, IconSize.Toolbar, OctoColors.TextPrimary) }
+    state.live?.let { live -> return OnAirButton(app, live, ControlHeight.S, IconSize.Toolbar, OctoColors.TextPrimary, quiet) }
     if (isOpenedFile(song.id) || isOutside(app, song)) return
     val starred = app.isStarred(song)
-    IconAction(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setStarred(listOf(song), !starred) }, size = ControlHeight.S, iconSize = IconSize.Toolbar)
+    IconAction(
+        if (starred) OctoIcons.Liked else OctoIcons.Like,
+        if (starred) "Remove from favorites" else "Add to favorites",
+        { app.setStarred(listOf(song), !starred) },
+        size = ControlHeight.S,
+        iconSize = IconSize.Toolbar,
+        tint = if (starred) OctoColors.TextPrimary else OctoColors.TextPrimary.copy(alpha = quiet),
+    )
 }
 
 // Lyrics or the queue: shows it under the player (growing the window when

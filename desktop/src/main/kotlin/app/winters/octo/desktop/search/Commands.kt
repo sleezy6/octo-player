@@ -4,7 +4,11 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.SidePanel
 import app.winters.octo.desktop.liveradio.LIVE_RADIO_NEAR
 import app.winters.octo.desktop.nav.Page
+import app.winters.octo.desktop.pages.RADIO_SECTION
+import app.winters.octo.desktop.pages.STATIONS_ON_SERVER
+import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.desktop.pages.addServer
+import app.winters.octo.desktop.pages.showSection
 import app.winters.octo.desktop.pages.switchServer
 import app.winters.octo.desktop.settings.name
 import app.winters.octo.desktop.player.RepeatMode
@@ -50,6 +54,24 @@ fun commandsFor(app: AppState): List<Command> = buildList {
     if (app.search?.charts?.offered == true) page("Charts", Page.Charts, "top songs popular right now best new trending genre chart hip hop pop country")
     page("Sound", Page.Sound, "equalizer eq loudness crossfade blend transitions automix tempo")
     page("Settings", Page.Settings, "preferences options")
+    // Settings' Radio section, by what each of its parts holds.
+    fun radio(title: String, words: String) = add(Command(title, go, "open settings radio $words") {
+        app.fullPlayer = false
+        showSection("Settings", RADIO_SECTION)
+        app.navigator.go(Page.Settings)
+    })
+    radio("Song radio settings", "start radio autoplay discovery adventure artist variety favorites more often tuning similar songs")
+    radio(STATIONS_ON_SERVER, "live radio internet radio stations streams add a station edit fm")
+    add(Command("Accent color", "Settings", "theme colour tint highlight palette appearance album art cover") {
+        app.fullPlayer = false
+        showSection("Settings", "look")
+        app.navigator.go(Page.Settings)
+    })
+    add(Command(AnimatedArtSetting.TITLE, go, "settings animated covers album art loops apple music full screen square still") {
+        app.fullPlayer = false
+        showSection("Settings", "look")
+        app.navigator.go(Page.Settings)
+    })
     app.liveLists.lists.value.forEach { list -> page(list.name, Page.LiveList(list.id), "live list smart playlist") }
 
     val state = app.player.state.value

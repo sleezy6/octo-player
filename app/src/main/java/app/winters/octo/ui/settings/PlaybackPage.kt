@@ -19,7 +19,7 @@ import androidx.lifecycle.viewModelScope
 import app.winters.octo.design.OctoColors
 import app.winters.octo.design.OctoIcons
 import app.winters.octo.playback.FadeCurve
-import app.winters.octo.playback.SMART_PICKS_THE_CURVE
+import app.winters.octo.playback.curveRowLook
 import app.winters.octo.playback.detail
 import app.winters.octo.playback.fadeInGain
 import app.winters.octo.playback.fadeOutGain
@@ -29,9 +29,6 @@ import app.winters.octo.player.CrossfadeSecondsRange
 import app.winters.octo.player.PlayerPrefs
 import app.winters.octo.player.PlayerSettings
 import app.winters.octo.player.SpeedPopup
-import app.winters.octo.radio.RadioAdventure as Adventure
-import app.winters.octo.radio.RadioDiscovery as Discovery
-import app.winters.octo.radio.RadioVariety as Variety
 import app.winters.octo.ui.common.Choice
 import app.winters.octo.ui.common.ChoiceRequest
 import app.winters.octo.ui.common.LocalChoiceSheet
@@ -63,10 +60,6 @@ class PlaybackViewModel @Inject constructor(private val settings: PlayerSettings
     fun setCrossfadeCurve(curve: FadeCurve) = change { setCrossfadeCurve(curve) }
     fun setSkipSilence(on: Boolean) = change { setSkipSilence(on) }
     fun setAutoplay(on: Boolean) = change { setAutoplay(on) }
-    fun setRadioDiscovery(discovery: Discovery) = change { setRadioDiscovery(discovery) }
-    fun setRadioAdventure(adventure: Adventure) = change { setRadioAdventure(adventure) }
-    fun setRadioVariety(variety: Variety) = change { setRadioVariety(variety) }
-    fun setRadioFavorites(on: Boolean) = change { setRadioFavorites(on) }
     fun setResumeWired(on: Boolean) = change { setResumeWired(on) }
     fun setResumeBluetooth(on: Boolean) = change { setResumeBluetooth(on) }
     fun setResumeAlways(on: Boolean) = change { setResumeAlways(on) }
@@ -81,14 +74,13 @@ private fun paceLabel(prefs: PlayerPrefs): String = buildString {
     if (prefs.pitchSemitones != 0) append(", shifted ${prefs.pitchSemitones} st")
 }
 
-// How songs play: blending, speed, skipping silence, Autoplay and how radio
-// is tuned, music coming back when headphones connect, and casting to TVs
-// and speakers.
+// How songs play: blending, speed, skipping silence and Autoplay, music
+// coming back when headphones connect, and casting to TVs and speakers.
+// Radio has a page of its own.
 @Composable
 fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel = hiltViewModel()) {
     val prefs by vm.prefs.collectAsStateWithLifecycle()
     var speedOpen by rememberSaveable { mutableStateOf(false) }
-    val sheet = LocalChoiceSheet.current
 
     SettingsPageFrame("Playback", onBack, highlight) {
         SettingsGroup {
@@ -132,39 +124,7 @@ fun PlaybackPage(onBack: () -> Unit, highlight: String?, vm: PlaybackViewModel =
                 SettingsIndex.Autoplay,
                 checked = prefs.autoplay,
                 onChange = vm::setAutoplay,
-                helper = "When the queue ends, similar songs keep playing.",
-            )
-        }
-        SettingsGroup(title = "Radio", icon = OctoIcons.Radio) {
-            val discoveries = Discovery.entries
-            ChoiceRow(SettingsIndex.RadioDiscovery, value = prefs.radioDiscovery.label, onClick = {
-                sheet.show(
-                    ChoiceRequest(SettingsIndex.RadioDiscovery.title, discoveries.map { Choice(it.label, it.detail) }, discoveries.indexOf(prefs.radioDiscovery)) {
-                        vm.setRadioDiscovery(discoveries[it])
-                    },
-                )
-            })
-            val adventures = Adventure.entries
-            ChoiceRow(SettingsIndex.RadioAdventure, value = prefs.radioAdventure.label, onClick = {
-                sheet.show(
-                    ChoiceRequest(SettingsIndex.RadioAdventure.title, adventures.map { Choice(it.label, it.detail) }, adventures.indexOf(prefs.radioAdventure)) {
-                        vm.setRadioAdventure(adventures[it])
-                    },
-                )
-            })
-            val varieties = Variety.entries
-            ChoiceRow(SettingsIndex.RadioVariety, value = prefs.radioVariety.label, onClick = {
-                sheet.show(
-                    ChoiceRequest(SettingsIndex.RadioVariety.title, varieties.map { Choice(it.label, it.detail) }, varieties.indexOf(prefs.radioVariety)) {
-                        vm.setRadioVariety(varieties[it])
-                    },
-                )
-            })
-            SwitchRow(
-                SettingsIndex.RadioFavorites,
-                checked = prefs.radioFavorites,
-                onChange = vm::setRadioFavorites,
-                helper = "Songs you hearted or rated 4 or 5 stars come around more often.",
+                helper = "When the queue ends, similar songs keep playing, picked as Radio settings say.",
             )
         }
         SettingsGroup(
@@ -233,16 +193,18 @@ private fun CrossfadeLength(seconds: Int, onChange: (Int) -> Unit) {
 }
 
 // The shape of the crossfade, picked from a list that draws each one. With
-// smart transitions on, Automix picks the curve and the row only says so.
+// smart transitions on they pick the curve, and the row says so and names
+// the switch under it that frees the choice.
 @Composable
 private fun CurveRow(curve: FadeCurve, smart: Boolean, onPick: (FadeCurve) -> Unit) {
     val sheet = LocalChoiceSheet.current
     val curves = FadeCurve.entries
+    val look = curveRowLook(curve, smart)
     ChoiceRow(
         SettingsIndex.CrossfadeCurve,
-        value = if (smart) "Automix" else curve.label,
-        enabled = !smart,
-        helper = if (smart) SMART_PICKS_THE_CURVE else curve.detail,
+        value = look.value,
+        enabled = look.choosable,
+        helper = look.helper,
         onClick = {
             sheet.show(
                 ChoiceRequest(

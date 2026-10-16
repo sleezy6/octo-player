@@ -1,5 +1,7 @@
 package app.winters.octo.desktop
 
+import app.winters.octo.animated.LoopShelf
+import app.winters.octo.desktop.animated.LOOP_SHELF_BYTES
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
@@ -12,10 +14,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.FilterQuality
-import androidx.compose.ui.graphics.painter.BitmapPainter
-import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -75,6 +73,10 @@ import app.winters.octo.desktop.window.MIN_WIDTH
 import app.winters.octo.desktop.window.keepsSpot
 import app.winters.octo.desktop.window.placeWindow
 import app.winters.octo.desktop.window.roundWindowsCorners
+import app.winters.octo.desktop.window.appTextPixels
+import app.winters.octo.desktop.window.systemTextPixels
+import app.winters.octo.desktop.window.useTextPixels
+import app.winters.octo.design.TextLook
 import app.winters.octo.desktop.window.screenAreas
 import app.winters.octo.desktop.window.seeThroughMacTitleBar
 import app.winters.octo.subsonic.OCTO_TRANSITIONS
@@ -96,19 +98,16 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.skiko.GraphicsApi
+import app.winters.octo.desktop.system.OctopusArt
+import app.winters.octo.desktop.system.OctopusPainter
+import java.awt.image.BufferedImage
+import java.util.concurrent.CompletableFuture
+import kotlinx.coroutines.withContext
 
-private fun appIcon(): Painter? = runCatching {
-    val bytes = AppState::class.java.getResourceAsStream("/octo-icon.png")!!.use { it.readBytes() }
-    BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap())
-}.getOrNull()
-
-// Octo's octopus alone, for the window's opening: the logo's own pixels with
-// no tile, written by tools/appicon/make_app_icon.py. Drawn smaller than it
-// is stored, so it is scaled smoothly.
-private fun openingOctopus(): Painter? = runCatching {
-    val bytes = AppState::class.java.getResourceAsStream("/octo-opening.png")!!.use { it.readBytes() }
-    BitmapPainter(org.jetbrains.skia.Image.makeFromEncoded(bytes).toComposeImageBitmap(), filterQuality = FilterQuality.High)
-}.getOrNull()
+// The window's icons, one drawn from the vector for each size Windows may
+// ask for, made beside the start so they are ready when the window shows.
+private fun windowIconsAhead(): CompletableFuture<List<BufferedImage>> =
+    CompletableFuture.supplyAsync { runCatching { OctopusArt.windowIcons() }.getOrDefault(emptyList()) }
 
 // What the window runs once the app is made.
 private class Opened(val app: AppState, val system: SystemIntegration, val updates: DesktopUpdates)
@@ -135,6 +134,10 @@ fun main(args: Array<String>) {
     val instance = (claim as? SingleInstance.Claim.First)?.instance
     val settings = SettingsStore(File(places.config, SettingsStore.FILE_NAME), SettingsStore.APP_WRITE_DELAY_MS)
     val os = currentOs()
+    // Text smoothed as the system smooths its own, decided before any text
+    // style is first read.
+    appTextPixels = systemTextPixels(os)
+    TextLook.colour = appTextPixels != null
     // The slow part (the HTTP client, the password store, the audio engine
     // and the rest) starts now on threads of its own; the window shows
     // while it runs, and the app is made once it is in.
@@ -144,8 +147,8 @@ fun main(args: Array<String>) {
     var systemCalm by mutableStateOf(false)
     // The system's text size, read the same way.
     var systemText by mutableStateOf(1f)
-    val icon = appIcon()
-    val octopus = openingOctopus()
+    val icons = windowIconsAhead()
+    val octopus = OctopusPainter()
     val inTray = startsInTray(args.toList())
     // The opening comes in quietly when the listener asked for calm motion.
     val calmStart = settings.current.appearance.calmMotion
@@ -223,7 +226,7 @@ fun main(args: Array<String>) {
                 player.problem?.let { problem -> it.notice = problem }
             }
             app.playlistArt.folder = File(places.cache, "playlist-art")
-            app.motionCovers.art.folder = File(places.cache, "motion-covers")
+            app.animated.shelf = LoopShelf(File(places.cache, "loops"), LOOP_SHELF_BYTES)
             app.coverImages = { SingletonImageLoader.get(PlatformContext.INSTANCE) }
             // Kept songs carry on fetching, and play from this computer.
             app.offline.start()
@@ -257,7 +260,6 @@ fun main(args: Array<String>) {
             // Before the app is made: shown, unless it starts in the tray.
             visible = ready?.system?.windowVisible ?: !inTray,
             title = "Octo",
-            icon = icon,
             undecorated = custom,
             onPreviewKeyEvent = { event ->
                 val made = opened ?: return@Window false
@@ -278,6 +280,12 @@ fun main(args: Array<String>) {
                 app.perform(shortcut)
             },
         ) {
+            // Before the window first draws, so its surfaces know their pixels.
+            remember { useTextPixels(window, appTextPixels) }
+            LaunchedEffect(Unit) {
+                val drawn = withContext(Dispatchers.IO) { icons.get() }
+                if (drawn.isNotEmpty()) window.iconImages = drawn
+            }
             val own = remember { if (custom) Frame(window, windowState) else null }
             LaunchedEffect(Unit) {
                 frame = own
@@ -385,7 +393,7 @@ fun main(args: Array<String>) {
             }
             }
         }
-        if (ready != null) with(ready.system) { Surfaces(icon) }
+        if (ready != null) with(ready.system) { Surfaces(null) }
     }
 }
 
