@@ -16,9 +16,7 @@ import app.winters.octo.player.PlayerSettings
 import app.winters.octo.subsonic.AnimatedArt
 import app.winters.octo.subsonic.AnimatedClip
 import app.winters.octo.subsonic.OCTO_ANIMATED_ART
-import app.winters.octo.subsonic.OCTO_ANIMATED_ARTWORK
 import app.winters.octo.subsonic.SubsonicClient
-import app.winters.octo.subsonic.animatedArtworkOnly
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -82,19 +80,8 @@ class AnimatedArts @Inject constructor(
         if (session == null) return null
         val client = session.client
         shelf.value?.takeIf { it.client === client }?.let { return it }
-        val book = AnimatedArtBook(scope, offered = { offeredOn(client) }, ask = { client.animatedArt(it) })
+        val book = AnimatedArtBook(scope, offered = { client.supportsIfKnown(OCTO_ANIMATED_ART) }, ask = { client.animatedArt(it) })
         return Shelf(client, session.sourceId, book)
-    }
-
-    // Whether the server offers animated art, through octoAnimatedArt or the
-    // fork's octoAnimatedArtwork (which the client is then set to ask), or
-    // null when its extensions could not be read.
-    private suspend fun offeredOn(client: SubsonicClient): Boolean? {
-        val art = client.supportsIfKnown(OCTO_ANIMATED_ART) ?: return null
-        if (art) return true
-        val artwork = client.supportsIfKnown(OCTO_ANIMATED_ARTWORK) ?: return null
-        client.animatedArtwork = animatedArtworkOnly(art, artwork)
-        return artwork
     }
 
     // The album a song is in, by the server's own id: a library song's copy

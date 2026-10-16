@@ -193,9 +193,6 @@ data class AlbumWithSongs(
     // Octo: the album's animated art, when the server already knows it.
     // Missing says nothing either way; getAnimatedArt asks.
     val animatedArt: AnimatedArt? = null,
-    // The fork's octoAnimatedArtwork form of the same; album() reads it
-    // into animatedArt.
-    val animatedArtwork: AnimatedArtwork? = null,
 )
 
 @Serializable

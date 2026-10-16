@@ -20,10 +20,6 @@ import app.winters.octo.desktop.server.Connection
 import app.winters.octo.subsonic.AnimatedArt
 import app.winters.octo.subsonic.AnimatedClip
 import app.winters.octo.subsonic.OCTO_ANIMATED_ART
-import app.winters.octo.subsonic.OCTO_ANIMATED_ARTWORK
-import app.winters.octo.subsonic.offersAnimatedArt
-import app.winters.octo.subsonic.animatedArtworkOnly
-import app.winters.octo.subsonic.lists
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -102,10 +98,9 @@ class AnimatedArtModel(
         if (server == bookServer) return
         bookServer = server
         book = now?.let { connection ->
-            connection.client.animatedArtwork = animatedArtworkOnly(connection.supports(OCTO_ANIMATED_ART), connection.supports(OCTO_ANIMATED_ARTWORK))
             AnimatedArtBook(
                 scope,
-                offered = { if (connection.supports(OCTO_ANIMATED_ART) || connection.supports(OCTO_ANIMATED_ARTWORK)) true else offeredLive(connection) },
+                offered = { if (connection.supports(OCTO_ANIMATED_ART)) true else offeredLive(connection) },
                 ask = { albumId -> connection.client.animatedArt(albumId) },
             )
         }
@@ -114,11 +109,7 @@ class AnimatedArtModel(
     // A server listed without the extension at sign-in may have it on since:
     // its extensions are asked again once.
     private suspend fun offeredLive(connection: Connection): Boolean? =
-        runCatching {
-            val listed = connection.client.extensions()
-            connection.client.animatedArtwork = animatedArtworkOnly(listed.lists(OCTO_ANIMATED_ART), listed.lists(OCTO_ANIMATED_ARTWORK))
-            listed.offersAnimatedArt()
-        }.getOrNull()
+        runCatching { connection.client.extensions().any { it.name == OCTO_ANIMATED_ART } }.getOrNull()
 
     // Keeps the art getAlbum came with.
     fun note(albumId: String, art: AnimatedArt?) {

@@ -65,7 +65,6 @@ import app.winters.octo.desktop.ui.LocalSoftwareDrawing
 import app.winters.octo.ui.family.AUDIO_QUALITY
 import app.winters.octo.animated.AnimatedArtSetting
 import app.winters.octo.desktop.settings.animatedArtSetting
-import app.winters.octo.desktop.settings.AnimatedGrids
 import kotlin.math.roundToInt
 
 // Settings: the servers, how Octo looks, playback, listening, lyrics, radio,
@@ -153,11 +152,6 @@ private fun AppearanceGroups(app: AppState, settings: AppSettings) {
         }
         ChoiceRow(AnimatedArtSetting.TITLE, animatedHelp, AnimatedArtSetting.entries, animated, AnimatedArtSetting::label) { choice ->
             appearance { it.copy(animatedArt = choice.key) }
-        }
-        if (animated != AnimatedArtSetting.Off) {
-            ChoiceRow("In album grids", gridsHelp(look.animatedGrids), AnimatedGrids.entries, look.animatedGrids, ::gridsName) { grids ->
-                appearance { it.copy(animatedGrids = grids) }
-            }
         }
         SwitchRow("Moving background", "Off holds the colors still, easier on a battery.", look.wash.moving) { on ->
             wash { it.copy(moving = on) }
@@ -330,15 +324,3 @@ private fun motionHelp(motion: AmbienceMotion): String = when (motion) {
 // The version the build stamped, or "Development build" when run from source
 // without it.
 fun appVersion(): String = System.getProperty("octo.version")?.takeIf(String::isNotBlank) ?: "Development build"
-
-private fun gridsName(grids: AnimatedGrids): String = when (grids) {
-    AnimatedGrids.Off -> "Off"
-    AnimatedGrids.Hover -> "On hover"
-    AnimatedGrids.Always -> "Always"
-}
-
-private fun gridsHelp(grids: AnimatedGrids): String = when (grids) {
-    AnimatedGrids.Off -> "Album grids keep still covers."
-    AnimatedGrids.Hover -> "The album under the pointer moves."
-    AnimatedGrids.Always -> "Every album in sight moves. Uses more power and downloads more."
-}

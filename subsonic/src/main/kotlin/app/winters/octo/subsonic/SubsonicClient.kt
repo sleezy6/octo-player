@@ -270,31 +270,20 @@ class SubsonicClient(
 
     suspend fun album(id: String): AlbumWithSongs =
         get("getAlbum", mapOf("id" to id), "album", AlbumWithSongs.serializer()).let { album ->
-            val art = album.animatedArt ?: album.animatedArtwork?.asArt()
-            art?.let { album.copy(animatedArt = it.resolvedOn(baseUrl).takeUnless(AnimatedArt::isEmpty), animatedArtwork = null) } ?: album
+            album.animatedArt?.let { album.copy(animatedArt = it.resolvedOn(baseUrl).takeUnless(AnimatedArt::isEmpty)) } ?: album
         }
 
     // An album's animated art, on a server that lists octoAnimatedArt, with
     // whole addresses. A server that never asked Apple about the album asks
     // now, for up to 10 seconds, so this call may take that long.
-    // A server listing only the fork's octoAnimatedArtwork is asked through
-    // getAnimatedArtwork instead, its answer read the same way.
     suspend fun animatedArt(albumId: String): AnimatedArtAnswer =
         try {
-            val art = if (animatedArtwork) {
-                getOptional("getAnimatedArtwork", mapOf("id" to albumId), "animatedArtwork", AnimatedArtwork.serializer(), patient)?.asArt()
-            } else {
-                getOptional("getAnimatedArt", mapOf("id" to albumId), "animatedArt", AnimatedArt.serializer(), patient)
-            }?.resolvedOn(baseUrl)
+            val art = getOptional("getAnimatedArt", mapOf("id" to albumId), "animatedArt", AnimatedArt.serializer(), patient)
+                ?.resolvedOn(baseUrl)
             if (art == null || art.isEmpty) AnimatedArtAnswer.None else AnimatedArtAnswer.Found(art)
         } catch (e: SubsonicException) {
             animatedArtAnswerFor(e)
         }
-
-    // Whether animated art is asked through the fork's getAnimatedArtwork:
-    // set by whoever learns the server lists octoAnimatedArtwork and not
-    // octoAnimatedArt (see animatedArtworkOnly).
-    @Volatile var animatedArtwork: Boolean = false
 
     // A whole address for one of an animated art clip's, which a server
     // passing the clips on itself gives relative to its own address.

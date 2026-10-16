@@ -7,8 +7,6 @@ import app.winters.octo.desktop.animated.PowerSaving
 import app.winters.octo.desktop.settings.animatedArtSetting
 import app.winters.octo.subsonic.AnimatedArtAnswer
 import app.winters.octo.subsonic.OCTO_ANIMATED_ART
-import app.winters.octo.subsonic.OCTO_ANIMATED_ARTWORK
-import app.winters.octo.subsonic.animatedArtworkOnly
 import app.winters.octo.serverupdate.LaterStore
 import app.winters.octo.serverupdate.ServerUpdateHttp
 import app.winters.octo.serverupdate.ServerUpdateWatcher
@@ -270,8 +268,7 @@ class AppState(
     // albums kept here; none when it offers none or the setting is Off.
     private fun artAsker(): (suspend (String) -> AnimatedArtAnswer)? {
         val now = connection ?: return null
-        if (settings.current.appearance.animatedArtSetting == AnimatedArtSetting.Off || !(now.supports(OCTO_ANIMATED_ART) || now.supports(OCTO_ANIMATED_ARTWORK))) return null
-        now.client.animatedArtwork = animatedArtworkOnly(now.supports(OCTO_ANIMATED_ART), now.supports(OCTO_ANIMATED_ARTWORK))
+        if (settings.current.appearance.animatedArtSetting == AnimatedArtSetting.Off || !now.supports(OCTO_ANIMATED_ART)) return null
         return { id -> now.client.animatedArt(id) }
     }
 

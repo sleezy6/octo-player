@@ -1,7 +1,5 @@
 package app.winters.octo.desktop.system
 
-import app.winters.octo.desktop.animated.MiniPlayerCover
-
 import app.winters.octo.desktop.window.appTextPixels
 import app.winters.octo.desktop.window.useTextPixels
 import app.winters.octo.desktop.ui.MarkedTitle
@@ -452,7 +450,7 @@ private fun MiniCover(app: AppState, state: PlayerState, panel: MiniPanel?, pinn
         BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
             val side = minOf(maxWidth, maxHeight)
             Box(Modifier.size(side)) {
-                MiniArt(app, state, Modifier.fillMaxSize(), Corner.ArtLShape, moving = true)
+                MiniArt(app, state, Modifier.fillMaxSize(), Corner.ArtLShape)
                 // A soft shade at the top, so the buttons read on any cover.
                 Box(Modifier.fillMaxWidth().height(ControlHeight.L + Space.Xl).background(TopShade, Corner.ArtLShape))
                 Box(Modifier.align(Alignment.TopEnd).padding(Space.Xs)) { WindowButtons(pinned, bar = false, actions) }
@@ -517,17 +515,12 @@ private fun MiniWithPanel(app: AppState, state: PlayerState, panel: MiniPanel, p
 
 private val TopShade = Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.45f), Color.Transparent))
 
-// The playing song's cover, or a station's picture. `moving` (the fork's,
-// the large cover only): the album's animated loop over it, if any.
+// The playing song's cover, or a station's picture.
 @Composable
-private fun MiniArt(app: AppState, state: PlayerState, modifier: Modifier, shape: Shape, small: Boolean = false, moving: Boolean = false) {
+private fun MiniArt(app: AppState, state: PlayerState, modifier: Modifier, shape: Shape, small: Boolean = false) {
     val live = state.live
-    val song = state.current?.song
-    when {
-        live != null -> LiveCover(app, live, modifier, shape, small = small)
-        moving -> MiniPlayerCover(app, song?.albumId, song?.coverArt, seen = true, shape = shape, modifier = modifier)
-        else -> Cover(song?.coverArt, modifier, shape = shape, placeholder = OctoIcons.Songs, retry = true)
-    }
+    if (live != null) LiveCover(app, live, modifier, shape, small = small)
+    else Cover(state.current?.song?.coverArt, modifier, shape = shape, placeholder = OctoIcons.Songs, retry = true)
 }
 
 // The song's title and artist, or that nothing plays. A station shows the

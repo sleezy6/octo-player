@@ -95,28 +95,3 @@ internal fun resolveArtAddress(address: String, base: HttpUrl): HttpUrl? {
         .encodedQuery(query)
         .build()
 }
-
-// The Octo fork's own extension for the same covers (sleezy6/octo):
-// getAnimatedArtwork, and an `animatedArtwork` field on getAlbum, giving
-// the square and tall playlists only (no still, color or size), relative
-// to the server as `rest/` is. A server listing this one and not
-// octoAnimatedArt is asked through it, its answer read as AnimatedArt.
-const val OCTO_ANIMATED_ARTWORK = "octoAnimatedArtwork"
-
-@Serializable
-data class AnimatedArtwork(
-    val url: String? = null,
-    val urlTall: String? = null,
-) {
-    fun asArt(): AnimatedArt = AnimatedArt(
-        square = url?.takeIf(String::isNotBlank)?.let { AnimatedClip(video = it) },
-        tall = urlTall?.takeIf(String::isNotBlank)?.let { AnimatedClip(video = it) },
-    )
-}
-
-// Whether animated art is to be asked through octoAnimatedArtwork: only
-// when octoAnimatedArt is not listed beside it.
-fun animatedArtworkOnly(art: Boolean, artwork: Boolean): Boolean = !art && artwork
-
-// Whether these extensions offer animated art either way.
-fun List<Extension>.offersAnimatedArt(): Boolean = lists(OCTO_ANIMATED_ART, 1) || lists(OCTO_ANIMATED_ARTWORK, 1)
