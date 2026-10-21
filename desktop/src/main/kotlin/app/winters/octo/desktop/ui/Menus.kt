@@ -30,6 +30,8 @@ import app.winters.octo.desktop.ratingOf
 import app.winters.octo.desktop.removeFromPlaylist
 import app.winters.octo.desktop.removeFromQueue
 import app.winters.octo.desktop.setRating
+import app.winters.octo.desktop.artistRatingOf
+import app.winters.octo.desktop.setArtistRating
 import app.winters.octo.desktop.startAlbumRadio
 import app.winters.octo.desktop.startArtistRadio
 import app.winters.octo.desktop.startRadio
@@ -373,7 +375,12 @@ private fun askToFindFlac(app: AppState, upgrades: UpgradeModel, name: String, s
 // have, album by album, start a radio of songs like theirs, or keep them.
 // `starred` is the heart the server sent with the artist.
 @Composable
-fun ColumnScope.ArtistMenu(app: AppState, id: String, name: String, starred: String?, close: () -> Unit, outside: Boolean = false) {
+fun ColumnScope.ArtistMenu(app: AppState, id: String, name: String, starred: String?, close: () -> Unit, outside: Boolean = false, rated: Int? = null) {
+    var rating by remember { mutableStateOf(false) }
+    if (rating) {
+        RateMenu(app.artistRatingOf(id, rated), { app.setArtistRating(id, name, it); close() }) { rating = false }
+        return
+    }
     MenuTitle(name)
     artistMenuActions(outside).forEachIndexed { index, group ->
         if (index > 0) MenuSeparator()
@@ -383,6 +390,9 @@ fun ColumnScope.ArtistMenu(app: AppState, id: String, name: String, starred: Str
                 CollectionAction.Favourite -> {
                     val on = app.isArtistStarred(id, starred)
                     MenuRow(if (on) "Remove from favorites" else "Add to favorites", { app.setArtistStarred(id, !on); close() }, if (on) OctoIcons.Liked else OctoIcons.Like)
+                    // One star leaves them out of radio and mixes on an Octo server.
+                    val stars = app.artistRatingOf(id, rated)
+                    MenuRow("Rate", { rating = true }, if (stars > 0) OctoIcons.StarFilled else OctoIcons.Star, more = true, detail = stars.takeIf { it > 0 }?.let(::starsLabel))
                 }
                 else -> CollectionRow(app, action, { app.artistSongs(id) }, close) {}
             }
@@ -476,7 +486,7 @@ internal fun NameField(value: String, onChange: (String) -> Unit, placeholder: S
 @Composable
 fun artistMenu(app: AppState, artist: Artist, outside: Boolean = false): () -> Unit {
     val pointer = LocalPointer.current
-    return { app.popups.showAt(pointer.point) { close -> ArtistMenu(app, artist.id, artist.name, artist.starred, close, outside) } }
+    return { app.popups.showAt(pointer.point) { close -> ArtistMenu(app, artist.id, artist.name, artist.starred, close, outside, rated = artist.userRating) } }
 }
 
 // Opens a playlist's menu where the pointer is, for a row's right click:

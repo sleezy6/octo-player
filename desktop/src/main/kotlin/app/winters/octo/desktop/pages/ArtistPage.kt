@@ -91,6 +91,8 @@ class ArtistView(
     val similar: List<Artist>,
     val picture: String?,
     val about: String?,
+    // The listener's rating of the artist, as the server sent it.
+    val rating: Int? = null,
 )
 
 // How many top songs show before "Show all".
@@ -130,6 +132,7 @@ private suspend fun loadArtist(connection: Connection, id: String): ArtistView =
         found?.similarArtist.orEmpty().filter { it.id.isNotEmpty() },
         found?.largeImageUrl?.takeIf(String::isNotBlank),
         found?.biography?.let(::cleanBiography),
+        artist.userRating,
     )
 }
 
@@ -222,7 +225,7 @@ private fun ArtistBody(app: AppState, id: String, fallbackName: String, artist: 
                     val starred = app.isArtistStarred(id, index?.artists?.firstOrNull { it.id == id }?.starred)
                     HeaderIcon(if (starred) OctoIcons.Liked else OctoIcons.Like, if (starred) "Remove from favorites" else "Add to favorites", { app.setArtistStarred(id, !starred) })
                     HeaderIcon(OctoIcons.Radio, "Start radio", { app.startArtistRadio(id, name) })
-                    MoreButton(app, "More for this artist") { close -> ArtistMenu(app, id, name, index?.artists?.firstOrNull { it.id == id }?.starred, close) }
+                    MoreButton(app, "More for this artist") { close -> ArtistMenu(app, id, name, index?.artists?.firstOrNull { it.id == id }?.starred, close, rated = artist.rating) }
                 }
             }
             page.item("jump") {

@@ -205,6 +205,9 @@ data class Artist(
     // OpenSubsonic extras: the artist's MusicBrainz id and how the name is filed.
     val musicBrainzId: String? = null,
     val sortName: String? = null,
+    // The listener's rating of the artist, 1 to 5 (OpenSubsonic); on an
+    // Octo server one star keeps the artist out of their radio and mixes.
+    val userRating: Int? = null,
 )
 
 @Serializable
@@ -214,6 +217,7 @@ data class ArtistWithAlbums(
     val coverArt: String? = null,
     val albumCount: Int = 0,
     val album: List<Album> = emptyList(),
+    val userRating: Int? = null,
 )
 
 @Serializable

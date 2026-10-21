@@ -106,6 +106,28 @@ class SongActionsTest {
     }
 
     @Test
+    fun oneStarOnAnArtistReachesTheServerAndSaysTheyLeaveTheRadio() {
+        server.answer("setRating")
+        val app = app()
+        assertEquals(3, app.artistRatingOf("ar1", 3))
+        app.setArtistRating("ar1", "Radiohead", 1)
+        assertEquals(1, app.artistRatingOf("ar1", 3))
+        waitFor { app.notice != null }
+        assertEquals("ar1" to "1", callsTo("setRating").single().url.let { it.queryParameter("id") to it.queryParameter("rating") })
+        assertEquals("Radiohead is left out of your radio and mixes.", app.notice)
+    }
+
+    @Test
+    fun anArtistRatingTheServerRefusesGoesBack() {
+        server.answerBy("setRating") { server.failed(50, "Not allowed") }
+        val app = app()
+        app.setArtistRating("ar1", "Radiohead", 4)
+        waitFor { app.notice != null }
+        assertEquals(2, app.artistRatingOf("ar1", 2))
+        assertTrue(app.notice!!.startsWith("Couldn't change the rating"))
+    }
+
+    @Test
     fun aRadioPlaysTheSongThenSongsLikeIt() {
         // The server sends the seed back and one song twice.
         server.answer("getSimilarSongs2", """"similarSongs2":{"song":[${songJson("s1", "One")},${songJson("s7", "Seven")},${songJson("s8", "Eight")},${songJson("s7", "Seven")}]}""")

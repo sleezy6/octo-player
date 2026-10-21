@@ -224,3 +224,26 @@ fun AppState.removeFromPlaylist(id: String, positions: List<Int>) {
 }
 
 fun AppState.removeFromQueue(keys: List<Long>) = removeQueued(keys)
+
+// An artist's rating, as songs' are: 1 to 5 stars, 0 for none. On an Octo
+// server one star keeps the artist out of the listener's radio, stations
+// and mixes, and any other rating lifts that.
+fun AppState.artistRatingOf(id: String, sent: Int?): Int = ratingOverrides[id] ?: cleanRating(sent)
+
+fun AppState.setArtistRating(id: String, name: String, rating: Int) {
+    val client = connection?.client ?: return
+    val stars = cleanRating(rating)
+    val before = ratingOverrides[id]
+    ratingOverrides[id] = stars
+    scope.launch {
+        try {
+            client.setRating(id, stars)
+            if (stars == 1) notice = "${name.ifBlank { "This artist" }} is left out of your radio and mixes."
+        } catch (e: SubsonicException) {
+            if (ratingOverrides[id] == stars) {
+                if (before == null) ratingOverrides.remove(id) else ratingOverrides[id] = before
+            }
+            notice = "Couldn't change the rating: ${e.userMessage()}"
+        }
+    }
+}
