@@ -89,6 +89,8 @@ class Frame(private val window: Window, private val state: WindowState) {
             override fun windowActivated(e: WindowEvent?) = refitLater()
         })
         window.addPropertyChangeListener("graphicsConfiguration") { refitLater() }
+        // A floating window keeps its size across screens of other scales.
+        ScreenChange(window, filled = { maximized })
     }
 
     fun toggleMaximized() = if (maximized) restore() else maximize()
@@ -136,12 +138,7 @@ class Frame(private val window: Window, private val state: WindowState) {
     fun lastFloatingBounds(): Rectangle = if (maximized) restoreTo ?: window.bounds else window.bounds
 
     // The screen the window is mostly on, less the taskbar or panels.
-    private fun usableArea(): Rectangle {
-        val config = window.graphicsConfiguration ?: GraphicsEnvironment.getLocalGraphicsEnvironment().defaultScreenDevice.defaultConfiguration
-        val bounds = config.bounds
-        val insets = Toolkit.getDefaultToolkit().getScreenInsets(config)
-        return Rectangle(bounds.x + insets.left, bounds.y + insets.top, bounds.width - insets.left - insets.right, bounds.height - insets.top - insets.bottom)
-    }
+    private fun usableArea(): Rectangle = usableArea(window)
 
     // Moves the window with the pointer, from where a drag started. A drag
     // on a filled window first brings it back to its size under the pointer.

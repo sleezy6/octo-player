@@ -68,6 +68,7 @@ import app.winters.octo.desktop.ui.Opening
 import app.winters.octo.desktop.ui.Shell
 import app.winters.octo.desktop.update.DesktopUpdates
 import app.winters.octo.desktop.window.Frame
+import app.winters.octo.desktop.window.ScreenChange
 import app.winters.octo.desktop.window.MIN_HEIGHT
 import app.winters.octo.desktop.window.MIN_WIDTH
 import app.winters.octo.desktop.window.keepsSpot
@@ -287,6 +288,8 @@ fun main(args: Array<String>) {
                 if (drawn.isNotEmpty()) window.iconImages = drawn
             }
             val own = remember { if (custom) Frame(window, windowState) else null }
+            // With the system's frame, the same steady size across screens.
+            remember { if (custom) null else ScreenChange(window, filled = { windowState.placement != WindowPlacement.Floating }) }
             LaunchedEffect(Unit) {
                 frame = own
                 window.minimumSize = Dimension(MIN_WIDTH.toInt(), MIN_HEIGHT.toInt())
