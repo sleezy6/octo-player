@@ -1016,6 +1016,14 @@ class AppState(
     fun canEdit(playlist: Playlist): Boolean =
         !playlist.readonly && (playlist.owner == null || playlist.owner == connection?.client?.username)
 
+    // Whether the listener can add songs to a playlist, take them off or
+    // move them: their own, and a family playlist Octo lets them change
+    // (owner "Family", not read-only). Renaming, the description, public or
+    // private and deleting stay with canEdit: Octo keeps those to a family
+    // playlist's maker or a manager.
+    fun canAddTo(playlist: Playlist): Boolean =
+        canEdit(playlist) || (!playlist.readonly && playlist.owner.equals(FAMILY_PLAYLIST_OWNER, ignoreCase = true))
+
     // Whether the server takes playlist changes in a form body.
     internal val formPost: Boolean
         get() = connection?.server?.extensions?.any { it.startsWith("$FORM_POST_EXTENSION:") } == true

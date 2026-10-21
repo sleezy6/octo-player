@@ -62,6 +62,9 @@ fun songMenuActions(
     place: SongPlace,
     outside: Boolean = false,
     ownsPlaylist: Boolean = false,
+    // The songs can be taken off the playlist but not moved: a family
+    // playlist, which Octo never takes whole again in a new order.
+    removeOnly: Boolean = false,
     lastPlaylist: Boolean = false,
     inFolder: Boolean = false,
     canAdd: Boolean = false,
@@ -75,6 +78,7 @@ fun songMenuActions(
 ): List<List<SongAction>> {
     val one = count == 1
     val editable = place is SongPlace.Playlist && ownsPlaylist && place.positions.isNotEmpty()
+    val removable = editable || (place is SongPlace.Playlist && removeOnly && place.positions.isNotEmpty())
     val groups = listOf(
         if (place is SongPlace.Queue) {
             listOfNotNull(SongAction.StartRadio.takeIf { one })
@@ -95,7 +99,7 @@ fun songMenuActions(
         listOfNotNull(SongAction.Details.takeIf { one }, SongAction.FindSongs.takeIf { one && canFind }),
         listOfNotNull(SongAction.Move.takeIf { editable }),
         listOfNotNull(
-            SongAction.RemoveFromPlaylist.takeIf { editable },
+            SongAction.RemoveFromPlaylist.takeIf { removable },
             SongAction.RemoveFromQueue.takeIf { place is SongPlace.Queue && place.keys.isNotEmpty() },
             SongAction.RemoveFromMyLibrary.takeIf { canRemoveFromMine && !outside },
             SongAction.DeleteFromDisk.takeIf { canDelete && !outside },

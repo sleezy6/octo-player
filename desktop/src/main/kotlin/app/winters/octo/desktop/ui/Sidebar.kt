@@ -334,7 +334,7 @@ private fun PlaylistRow(app: AppState, playlist: Playlist, selected: Boolean, ra
     // Songs dragged onto the listener's own playlist are added to it.
     val drag = LocalDrag.current
     val dropId = "pl:${playlist.id}"
-    val takes = drag.active && app.canEdit(playlist)
+    val takes = drag.active && app.canAddTo(playlist)
     val lit = takes && isDropOver(dropId)
     val row: @Composable () -> Unit = {
         Box(

@@ -281,7 +281,7 @@ fun SongTable(
         when (val where = place(rowsPicked)) {
             is SongPlace.Playlist -> {
                 val playlist = app.playlists.firstOrNull { it.id == where.id } ?: return false
-                if (!app.canEdit(playlist)) return false
+                if (!app.canAddTo(playlist)) return false
                 app.removeFromPlaylist(where.id, where.positions)
             }
             is SongPlace.Queue -> app.removeFromQueue(where.keys)

@@ -135,6 +135,32 @@ class FamilyPlaylistActionsTest {
     }
 
     @Test
+    fun familyPlaylistsOctoLetsUsChangeTakeSongsButStayTheFamilys() {
+        val app = app()
+        val ours = Playlist("of1", "Ours", owner = "Family")
+        val shut = Playlist("of2", "Kept", owner = "family", readonly = true)
+        val someone = Playlist("pl9", "Theirs", owner = "sam")
+        assertTrue(app.canAddTo(ours))
+        assertFalse(app.canEdit(ours), "renaming, public and deleting stay with its maker or a manager")
+        assertFalse(app.canAddTo(shut))
+        assertFalse(app.canAddTo(someone))
+        assertTrue(app.canAddTo(mine))
+        assertTrue(app.canEdit(mine))
+    }
+
+    @Test
+    fun aFamilyPlaylistsSongsCanBeTakenOffNotMoved() {
+        val inIt = app.winters.octo.desktop.ui.SongPlace.Playlist("of1", listOf(0))
+        val family = app.winters.octo.desktop.ui.songMenuActions(1, inIt, removeOnly = true).flatten()
+        assertTrue(app.winters.octo.desktop.ui.SongAction.RemoveFromPlaylist in family)
+        assertFalse(app.winters.octo.desktop.ui.SongAction.Move in family)
+        val own = app.winters.octo.desktop.ui.songMenuActions(1, inIt, ownsPlaylist = true).flatten()
+        assertTrue(app.winters.octo.desktop.ui.SongAction.Move in own)
+        val neither = app.winters.octo.desktop.ui.songMenuActions(1, inIt).flatten()
+        assertFalse(app.winters.octo.desktop.ui.SongAction.RemoveFromPlaylist in neither)
+    }
+
+    @Test
     fun onlyFamilyOwnedPlaylistsAreTheFamilys() {
         assertTrue(Playlist("of1", "Ours", owner = "Family").isFamily())
         assertFalse(mine.isFamily())

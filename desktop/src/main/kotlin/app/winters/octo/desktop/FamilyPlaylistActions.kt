@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 const val FAMILY_PLAYLIST_OWNER = "Family"
 
 // Whether a playlist is one of the family's.
-fun Playlist.isFamily(): Boolean = owner == FAMILY_PLAYLIST_OWNER
+fun Playlist.isFamily(): Boolean = owner.equals(FAMILY_PLAYLIST_OWNER, ignoreCase = true)
 
 // Whether the listener may make family playlists: Family on and the plan
 // lets them add to family playlists.

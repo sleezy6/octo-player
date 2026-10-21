@@ -222,7 +222,7 @@ class AddQuestion(val playlist: Playlist, val plan: AddPlan, songs: List<Song>) 
 
 // The listener's own playlists they added songs to lately, newest first.
 fun AppState.lastPlaylists(): List<Playlist> {
-    val own = playlists.filter(::canEdit).associateBy { it.id }
+    val own = playlists.filter(::canAddTo).associateBy { it.id }
     return settings.current.recentPlaylists.mapNotNull(own::get)
 }
 
@@ -236,7 +236,7 @@ private fun AppState.usedPlaylist(id: String) =
 suspend fun AppState.checkAdd(playlist: Playlist, songs: List<Song>): AddQuestion? {
     val client = connection?.client ?: return null
     if (songs.isEmpty()) return null
-    if (!canEdit(playlist)) {
+    if (!canAddTo(playlist)) {
         notice = "Only its owner can change ${playlist.name}"
         return null
     }

@@ -113,7 +113,10 @@ fun ColumnScope.SongMenu(
     when (page) {
         MenuPage.Main -> {
             MenuTitle(one?.title ?: "${songs.size} songs")
-            val owns = inPlaylist?.let { p -> app.playlists.firstOrNull { it.id == p.id }?.let(app::canEdit) } == true
+            val shownIn = inPlaylist?.let { p -> app.playlists.firstOrNull { it.id == p.id } }
+            val owns = shownIn?.let(app::canEdit) == true
+            // A family playlist's songs can be taken off, not moved.
+            val removeOnly = !owns && shownIn?.let(app::canAddTo) == true
             val starred = songs.all(app::isStarred)
             val rating = sharedRating(songs.map(app::ratingOf))
             if (extra != null) {
@@ -138,6 +141,7 @@ fun ColumnScope.SongMenu(
                 place,
                 outside,
                 owns,
+                removeOnly = removeOnly,
                 lastPlaylist = last != null,
                 inFolder = !one?.parent.isNullOrEmpty(),
                 canAdd = fetches != null,
@@ -555,7 +559,7 @@ fun ColumnScope.PlaylistChooser(app: AppState, songs: suspend () -> List<Song>, 
         MenuRow("New playlist", { naming = true }, OctoIcons.AddToLibrary)
     }
     val recent = app.lastPlaylists()
-    val rest = app.playlists.filter(app::canEdit) - recent.toSet()
+    val rest = app.playlists.filter(app::canAddTo) - recent.toSet()
     listOf(recent, rest).filter { it.isNotEmpty() }.forEach { group ->
         MenuSeparator()
         group.forEach { playlist ->
