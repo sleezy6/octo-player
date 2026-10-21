@@ -231,14 +231,16 @@ fun AppState.removeFromQueue(keys: List<Long>) = removeQueued(keys)
 fun AppState.artistRatingOf(id: String, sent: Int?): Int = ratingOverrides[id] ?: cleanRating(sent)
 
 fun AppState.setArtistRating(id: String, name: String, rating: Int) {
-    val client = connection?.client ?: return
+    val connection = connection ?: return
+    val client = connection.client
     val stars = cleanRating(rating)
     val before = ratingOverrides[id]
     ratingOverrides[id] = stars
     scope.launch {
         try {
             client.setRating(id, stars)
-            if (stars == 1) notice = "${name.ifBlank { "This artist" }} is left out of your radio and mixes."
+            // Only Octo keeps a one-star artist off the radio.
+            if (stars == 1 && connection.isOcto) notice = "${name.ifBlank { "This artist" }} is left out of your radio and mixes."
         } catch (e: SubsonicException) {
             if (ratingOverrides[id] == stars) {
                 if (before == null) ratingOverrides.remove(id) else ratingOverrides[id] = before

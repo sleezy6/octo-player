@@ -108,13 +108,23 @@ class SongActionsTest {
     @Test
     fun oneStarOnAnArtistReachesTheServerAndSaysTheyLeaveTheRadio() {
         server.answer("setRating")
-        val app = app()
+        val app = app(listOf("octoFamily:1"))
         assertEquals(3, app.artistRatingOf("ar1", 3))
         app.setArtistRating("ar1", "Radiohead", 1)
         assertEquals(1, app.artistRatingOf("ar1", 3))
         waitFor { app.notice != null }
         assertEquals("ar1" to "1", callsTo("setRating").single().url.let { it.queryParameter("id") to it.queryParameter("rating") })
         assertEquals("Radiohead is left out of your radio and mixes.", app.notice)
+    }
+
+    @Test
+    fun oneStarOnAnArtistSaysNothingOfTheRadioOnOtherServers() {
+        server.answer("setRating")
+        val app = app()
+        app.setArtistRating("ar1", "Radiohead", 1)
+        waitFor { callsTo("setRating").isNotEmpty() }
+        Thread.sleep(50)
+        assertNull(app.notice)
     }
 
     @Test

@@ -39,7 +39,11 @@ internal fun ColumnScope.FamilyPlaylistRows(app: AppState, playlist: Playlist, o
         MenuRow("Shared with…", { open(FamilyMenuPage.Share) }, OctoIcons.Share, more = true, detail = if (mine.sharedWith.isEmpty()) "Everyone" else "${mine.sharedWith.size}")
         return true
     }
-    if (owns && app.makesFamilyPlaylists()) {
+    if (owns && app.connection?.family == true) {
+        // The plan says whether family playlists can be made; it is read
+        // once per sign-in and kept, so this is quick after the first time.
+        val may by produceState(app.makesFamilyPlaylists()) { app.family.plan(); value = app.makesFamilyPlaylists() }
+        if (!may) return false
         MenuRow("Make a family playlist…", { open(FamilyMenuPage.Make) }, OctoIcons.AddToPlaylist, more = true)
         return true
     }

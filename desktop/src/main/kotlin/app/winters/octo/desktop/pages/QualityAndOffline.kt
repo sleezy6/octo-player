@@ -50,7 +50,11 @@ internal fun AudioQualityRows(app: AppState, settings: AppSettings) {
                 QualityRow(QUALITY_AWAY, "Anywhere else.", quality.away, awayLimit(quality)) { model.setQuality(away = it) }
             }
         }
-        model.explicit?.let { explicit -> ExplicitSongsGroup(explicit, model::setExplicit) }
+        model.explicit?.let { explicit ->
+            ExplicitSongsGroup(explicit, model::setExplicit)
+            // Why the server would not take a choice, as the Family page says it.
+            model.said?.let { Txt(it, DesktopType.body, OctoColors.SignalOrange, Modifier.padding(horizontal = RowInset), maxLines = 2) }
+        }
         model.deviceMode?.let { mode ->
             Group(QUALITY_ON_THIS_DEVICE) {
                 Rows {
