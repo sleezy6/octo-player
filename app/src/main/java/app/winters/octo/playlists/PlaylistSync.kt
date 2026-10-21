@@ -59,6 +59,9 @@ class PlaylistSync @Inject constructor(
     // One change to the server's playlists at a time.
     private val lock = Mutex()
 
+    // The server's family playlists, as the last look at its list found them.
+    @Volatile private var familyIds: Set<String> = emptySet()
+
     // Edits waiting to be sent, by playlist.
     private val waits = HashMap<String, Job>()
 
@@ -172,6 +175,7 @@ class PlaylistSync @Inject constructor(
             answerOf { client.radioStations() }?.mapTo(HashSet()) { it.id } ?: suspects.mapTo(HashSet()) { it.id }
         }
         val keep = importable(all, stations, client.username)
+        familyIds = keep.filter(::isFamilyPlaylist).mapTo(HashSet()) { it.id }
         val kept = user.serverPlaylists(server.sourceId)
         val steps = planPlaylists(
             server = keep.map { ServerPlaylist(it.id, it.name, stampOf(it.changed, it.songCount)) },
@@ -271,12 +275,13 @@ class PlaylistSync @Inject constructor(
         val serverId = playlist.serverId ?: return
         val linked = playlist.linked() ?: return
         val client = server.client
-        val listed = client.playlists().firstOrNull { it.id == serverId }
-            ?.let { ServerPlaylist(it.id, it.name, stampOf(it.changed, it.songCount)) }
+        val found = client.playlists().firstOrNull { it.id == serverId }
+        val listed = found?.let { ServerPlaylist(it.id, it.name, stampOf(it.changed, it.songCount)) }
         if (listed == null || listed.stamp != playlist.serverStamp) {
             planLinked(listed, linked)?.let { run(server, it) }
             return
         }
+        if (found != null && isFamilyPlaylist(found)) return pushFamily(server, playlist, serverId)
         val stamp = listed.stamp
         val there = client.playlist(serverId)
         val songs = songsToSend(server, playlist.id)
@@ -291,6 +296,28 @@ class PlaylistSync @Inject constructor(
         }
         val after = if (sent) listingStamp(server, serverId) ?: return else stamp
         user.markSynced(playlist.id, playlist.updatedAt, playlist.name, after)
+    }
+
+    // A family playlist's phone changes go to the server as the songs to
+    // take off and the songs to add, since Octo never takes one whole again;
+    // a new name too, which Octo takes only from its maker or a manager.
+    // Then the phone takes the server's own list and name back: its order,
+    // songs held for a manager's approval left out until approved, and the
+    // name the server kept.
+    private suspend fun pushFamily(server: Server, playlist: PlaylistEntity, serverId: String) {
+        val client = server.client
+        val there = client.playlist(serverId)
+        val edit = familyEdit(there.entry.map { it.id }, songsToSend(server, playlist.id))
+        if (!edit.isEmpty) client.updatePlaylist(serverId, songIdsToAdd = edit.add, songIndexesToRemove = edit.remove, formPost = server.formPost)
+        if (there.name != playlist.name) {
+            try {
+                client.updatePlaylist(serverId, name = playlist.name)
+            } catch (_: SubsonicException.Server) {
+                // Not theirs to rename: the server's name comes back below.
+            }
+        }
+        val stamp = listingStamp(server, serverId) ?: return
+        pull(server, PlaylistStep.Pull(playlist.id, serverId, stamp, keepName = false))
     }
 
     // Makes a phone playlist on the server and links the two.
@@ -310,6 +337,10 @@ class PlaylistSync @Inject constructor(
             server.client.deletePlaylist(serverId)
         } catch (_: SubsonicException.NotFound) {
             // Already gone.
+        } catch (e: SubsonicException.Server) {
+            // A family playlist only a manager may delete: asked once, not
+            // again. It comes back to the phone with the next sync.
+            if (!familyIds.contains(serverId)) throw e
         }
         store.removeDeleted(server.account, serverId)
     }

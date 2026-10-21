@@ -64,10 +64,48 @@ sealed interface PlaylistStep {
 
 fun stampOf(changed: String?, songCount: Int) = "${changed.orEmpty()}|$songCount"
 
-// Server playlists worth a copy on the phone: the signed-in user's own,
-// leaving out read-only ones and stations, which the stations shelf shows.
+// Server playlists worth a copy on the phone: the signed-in user's own and
+// the family playlists Octo lets them change, leaving out read-only ones and
+// stations, which the stations shelf shows.
 fun importable(playlists: List<Playlist>, stationIds: Set<String>, username: String): List<Playlist> =
-    playlists.filter { !it.readonly && it.id !in stationIds && ownedBy(it.owner, username) }
+    playlists.filter { !it.readonly && it.id !in stationIds && (ownedBy(it.owner, username) || isFamilyPlaylist(it)) }
+
+// The owner Octo gives family playlists in playlist lists.
+const val FAMILY_PLAYLIST_OWNER = "Family"
+
+// A family playlist the listener can add to and take songs off: Octo names
+// its owner "Family" and leaves it writable for them. Octo never takes one
+// whole again in a new order, and keeps renaming it to its maker and the
+// managers and deleting it to the managers.
+fun isFamilyPlaylist(playlist: Playlist): Boolean =
+    !playlist.readonly && playlist.owner.equals(FAMILY_PLAYLIST_OWNER, ignoreCase = true)
+
+// What brings a family playlist's songs to the phone's: the places on the
+// server's list to take off (counted from 0, as the server removes them)
+// and the songs to add at its end. A song on both stays where it is, as
+// many times as both have it; the order is the server's.
+data class FamilyEdit(val remove: List<Int>, val add: List<String>) {
+    val isEmpty: Boolean get() = remove.isEmpty() && add.isEmpty()
+}
+
+fun familyEdit(server: List<String>, phone: List<String>): FamilyEdit {
+    val wanted = HashMap<String, Int>()
+    phone.forEach { wanted[it] = (wanted[it] ?: 0) + 1 }
+    val remove = ArrayList<Int>()
+    server.forEachIndexed { index, id ->
+        val left = wanted[id] ?: 0
+        if (left > 0) wanted[id] = left - 1 else remove += index
+    }
+    val add = ArrayList<String>()
+    phone.forEach { id ->
+        val left = wanted[id] ?: 0
+        if (left > 0) {
+            add += id
+            wanted[id] = left - 1
+        }
+    }
+    return FamilyEdit(remove, add)
+}
 
 // How long the phone's copy of the server's playlists counts as fresh when
 // the playlists come on screen.

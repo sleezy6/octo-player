@@ -242,3 +242,37 @@ class PlaylistPlanTest {
         assertTrue(!playlistsStale(now, now))
     }
 }
+
+// Family playlists: Octo lists them with owner "Family", writable for those
+// it lets add to them, and takes their songs only added or taken off.
+class FamilyPlaylistPlanTest {
+    @Test
+    fun familyPlaylistsOctoLetsTheListenerChangeGetACopy() {
+        val lists = listOf(
+            Playlist("pl1", "Mine", owner = "alex"),
+            Playlist("of1", "Ours", owner = "Family"),
+            Playlist("of2", "Held", owner = "family", readonly = true),
+            Playlist("pl2", "Sam's", owner = "sam"),
+        )
+        assertEquals(listOf("pl1", "of1"), importable(lists, emptySet(), "alex").map { it.id })
+    }
+
+    @Test
+    fun songsOnBothStayAndTheRestAreTakenOffOrAdded() {
+        val edit = familyEdit(server = listOf("a", "b", "c", "d"), phone = listOf("a", "c", "e"))
+        assertEquals(listOf(1, 3), edit.remove)
+        assertEquals(listOf("e"), edit.add)
+    }
+
+    @Test
+    fun aNewOrderAloneChangesNothing() {
+        assertTrue(familyEdit(server = listOf("a", "b", "c"), phone = listOf("c", "a", "b")).isEmpty)
+    }
+
+    @Test
+    fun aSongTwiceCountsTwice() {
+        val edit = familyEdit(server = listOf("a", "a", "b"), phone = listOf("a", "b", "b"))
+        assertEquals(listOf(1), edit.remove)
+        assertEquals(listOf("b"), edit.add)
+    }
+}
