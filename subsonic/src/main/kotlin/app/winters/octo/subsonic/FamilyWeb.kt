@@ -3,6 +3,7 @@ package app.winters.octo.subsonic
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -52,6 +53,28 @@ data class FamilyNewInvite(
 ) {
     override fun toString() = "FamilyNewInvite(anywhereAvailable=$anywhereAvailable)"
 }
+
+// Which songs the account hears by their explicit mark (an Octo server's
+// per-listener choice): the server's own filter, everything, clean only,
+// or explicit versions (radio edits left out). The server filters; the
+// app only shows and changes the choice.
+enum class ExplicitChoice { Server, All, CleanOnly, ExplicitOnly }
+
+// The account's explicit choice, the server's own filter (what Server
+// means), and whether a kid profile's plan keeps it clean whatever the
+// choice. Words this app does not know read as Server or All.
+@Serializable
+data class FamilyExplicit(
+    @SerialName("choice") val choiceName: String = "Server",
+    @SerialName("server") val serverName: String = "All",
+    val cleanOnlyByFamily: Boolean = false,
+) {
+    val choice: ExplicitChoice get() = ExplicitChoice.entries.firstOrNull { it.name == choiceName } ?: ExplicitChoice.Server
+    val server: ExplicitChoice get() = ExplicitChoice.entries.firstOrNull { it.name == serverName && it != ExplicitChoice.Server } ?: ExplicitChoice.All
+}
+
+@Serializable
+private data class FamilyMeExplicit(val explicit: FamilyExplicit? = null)
 
 // The presets a manager picks for a new member.
 enum class FamilyPreset { CoAdmin, Member, Listener, Kid }
@@ -108,6 +131,13 @@ class FamilyWeb(
         )
         return added
     }
+
+    // The account's explicit choice, or null from a server that has none.
+    suspend fun explicit(): FamilyExplicit? = call("GET", "me", null, FamilyMeExplicit.serializer()).explicit
+
+    // Changes the account's explicit choice; the next answer follows it.
+    suspend fun setExplicit(choice: ExplicitChoice): FamilyExplicit =
+        call("PUT", "me/explicit", body("choice" to choice.name), FamilyExplicit.serializer())
 
     // A new invite link for a member, in place of the last one.
     suspend fun newInvite(username: String): FamilyNewInvite =

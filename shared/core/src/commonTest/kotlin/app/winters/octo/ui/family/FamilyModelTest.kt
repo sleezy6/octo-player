@@ -1,5 +1,7 @@
 package app.winters.octo.ui.family
 
+import app.winters.octo.subsonic.ExplicitChoice
+
 import app.winters.octo.subsonic.FamilyRequest
 import app.winters.octo.subsonic.FamilyRequestOutcome
 import app.winters.octo.subsonic.FamilyRequestState
@@ -146,6 +148,43 @@ class FamilyModelTest {
         server.answer("removeFromMyLibrary") { "" }
         model.removeFromMyLibrary("tr-2", "Other song")
         until("removed") { model.said == "Removed Other song from your library" }
+    }
+
+    @Test
+    fun theExplicitChoiceIsReadAndChangedSignedAsEveryCall() = runBlocking {
+        server.raw("me") { """{"username":"alex","explicit":{"choice":"Server","server":"CleanOnly","cleanOnlyByFamily":false}}""" }
+        server.raw("explicit") { """{"choice":"ExplicitOnly","server":"CleanOnly","cleanOnlyByFamily":false}""" }
+        model.refresh()
+        until("explicit read") { model.explicit != null }
+        assertEquals(ExplicitChoice.Server, model.explicit!!.choice)
+        assertEquals(ExplicitChoice.CleanOnly, model.explicit!!.server)
+
+        model.setExplicit(ExplicitChoice.ExplicitOnly)
+        assertEquals(ExplicitChoice.ExplicitOnly, model.explicit!!.choice)
+        until("sent") { server.called("explicit").isNotEmpty() }
+        val call = server.called("explicit").single()
+        assertEquals("PUT", call.method)
+        assertEquals("/api/family/me/explicit", call.url.encodedPath)
+        assertTrue(call.body!!.utf8().contains("\"choice\":\"ExplicitOnly\""))
+        assertEquals("alex", call.url.queryParameter("u"))
+        assertNull(call.url.queryParameter("p"))
+    }
+
+    @Test
+    fun anExplicitChoiceTheServerRefusesGoesBack() = runBlocking {
+        server.raw("me") { """{"explicit":{"choice":"All","server":"All"}}""" }
+        server.raw("explicit") { error("not signed in") }
+        model.refresh()
+        until("explicit read") { model.explicit != null }
+        model.setExplicit(ExplicitChoice.CleanOnly)
+        until("back") { model.said != null }
+        assertEquals(ExplicitChoice.All, model.explicit!!.choice)
+    }
+
+    @Test
+    fun aServerWithoutTheChoiceShowsNone() = runBlocking {
+        model.refresh()
+        assertNull(model.explicit)
     }
 
     @Test

@@ -12,6 +12,8 @@ import app.winters.octo.desktop.AppState
 import app.winters.octo.desktop.settings.AppSettings
 import app.winters.octo.offline.keptLine
 import app.winters.octo.subsonic.DeviceQualityMode
+import app.winters.octo.subsonic.ExplicitChoice
+import app.winters.octo.subsonic.FamilyExplicit
 import app.winters.octo.subsonic.StreamQuality
 import app.winters.octo.ui.family.QUALITY_AT_HOME
 import app.winters.octo.ui.family.QUALITY_AWAY
@@ -48,6 +50,7 @@ internal fun AudioQualityRows(app: AppState, settings: AppSettings) {
                 QualityRow(QUALITY_AWAY, "Anywhere else.", quality.away, awayLimit(quality)) { model.setQuality(away = it) }
             }
         }
+        model.explicit?.let { explicit -> ExplicitSongsGroup(explicit, model::setExplicit) }
         model.deviceMode?.let { mode ->
             Group(QUALITY_ON_THIS_DEVICE) {
                 Rows {
@@ -149,4 +152,32 @@ internal fun OfflineRows(app: AppState, settings: AppSettings) {
     if (status.kept > 0 || choices.byHand.isNotEmpty() || choices.liked || choices.playlists.isNotEmpty()) {
         Rows { ActionRow("Remove all", "Lets every kept song go and stops keeping any.", "Remove all", offline::removeAll) }
     }
+}
+
+// Which songs the account hears by their explicit mark, kept on the server
+// for every app: the server filters search, albums, playlists, radio and
+// mixes by it. A kid profile stays clean whatever is chosen.
+@Composable
+private fun ExplicitSongsGroup(explicit: FamilyExplicit, pick: (ExplicitChoice) -> Unit) {
+    Group("Explicit songs") {
+        if (explicit.cleanOnlyByFamily) {
+            Rows { SettingRow("Clean only", "Your family plan keeps songs clean.") }
+        } else {
+            ChoiceRow("Songs you hear", explicitHelp(explicit), ExplicitChoice.entries, explicit.choice, { explicitName(it, explicit.server) }, pick)
+        }
+    }
+}
+
+private fun explicitName(choice: ExplicitChoice, server: ExplicitChoice): String = when (choice) {
+    ExplicitChoice.Server -> "Default"
+    ExplicitChoice.All -> "Everything"
+    ExplicitChoice.CleanOnly -> "Clean only"
+    ExplicitChoice.ExplicitOnly -> "Explicit versions"
+}
+
+private fun explicitHelp(explicit: FamilyExplicit): String = when (explicit.choice) {
+    ExplicitChoice.Server -> "The server's choice: ${explicitName(explicit.server, explicit.server).lowercase()}."
+    ExplicitChoice.All -> "Every song, explicit or not."
+    ExplicitChoice.CleanOnly -> "Songs marked explicit are left out. Songs with no mark count as clean."
+    ExplicitChoice.ExplicitOnly -> "Radio edits are left out, so the original plays."
 }

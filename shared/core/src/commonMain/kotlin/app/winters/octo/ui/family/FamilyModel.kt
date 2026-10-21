@@ -15,6 +15,8 @@ import app.winters.octo.subsonic.FamilyMe
 import app.winters.octo.subsonic.FamilyMember
 import app.winters.octo.subsonic.FamilyPreset
 import app.winters.octo.subsonic.FamilyWeb
+import app.winters.octo.subsonic.ExplicitChoice
+import app.winters.octo.subsonic.FamilyExplicit
 import app.winters.octo.subsonic.FamilyRequest
 import app.winters.octo.subsonic.FamilyRequestState
 import app.winters.octo.subsonic.RequestQuality
@@ -82,6 +84,12 @@ class FamilyModel(
         private set
 
     var info by mutableStateOf<FamilyInfo?>(null)
+        private set
+
+    // The account's explicit choice (Everything, Clean only, Explicit
+    // versions or the server's own), read from the family page's API; null
+    // until read, and from a server that has none.
+    var explicit by mutableStateOf<FamilyExplicit?>(null)
         private set
 
     // Why the server could not be read.
@@ -166,6 +174,7 @@ class FamilyModel(
         devices = emptyList()
         saved = SavedOutside()
         login = null
+        explicit = null
         handOver.close()
         said = null
         invite = null
@@ -181,6 +190,7 @@ class FamilyModel(
         info = read
         // This device's quality mode decides how the app asks for songs.
         runCatching { client.familyDevices() }.getOrNull()?.let { devices = it }
+        readExplicit(client)
         return read.me
     }
 
@@ -190,6 +200,26 @@ class FamilyModel(
         val now = setFamilyQuality(home, away)
         info = info?.let { it.copy(me = it.me.copy(quality = now)) }
         null
+    }
+
+    private suspend fun readExplicit(client: SubsonicClient) {
+        runCatching { client.familyWeb().explicit() }.getOrNull()?.let { explicit = it }
+    }
+
+    // Changes which songs the account hears by their explicit mark: shown
+    // at once, and back as it was if the server says no.
+    fun setExplicit(choice: ExplicitChoice) {
+        val before = explicit ?: return
+        val client = client() ?: return
+        explicit = before.copy(choiceName = choice.name)
+        scope.launch {
+            try {
+                explicit = client.familyWeb().setExplicit(choice)
+            } catch (e: SubsonicException) {
+                if (explicit?.choiceName == choice.name) explicit = before
+                said = if (e is SubsonicException.Unreachable) "Octo can't reach the server right now." else e.message ?: "The server said no."
+            }
+        }
     }
 
     // Whether this device follows the account's choice or its own app's.
@@ -224,6 +254,7 @@ class FamilyModel(
                 starred.await()?.let { found -> saved = SavedOutside(found.song.filter { it.isExternal }, found.album.filter { it.isExternal }) }
                 login = own.await()
             }
+            readExplicit(client)
         } catch (e: SubsonicException.Unreachable) {
             problem = "Octo can't reach the server right now."
         } catch (e: SubsonicException) {
