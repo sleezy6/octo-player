@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.pages
 
+import app.winters.octo.desktop.familyShareLine
+
 import app.winters.octo.design.WholeTxt
 import app.winters.octo.desktop.ui.PlaylistPicture
 import app.winters.octo.desktop.ui.summary
@@ -122,6 +124,8 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
             },
         ) {
             item(key = "head") {
+                // A family playlist says who sees it in place of Public or Private.
+                val shared = app.familyShareLine(menuPlaylist)
                 ListHeader(
                     "Playlist",
                     playlist.name,
@@ -129,7 +133,8 @@ fun PlaylistPage(app: AppState, visit: Visit, id: String) {
                     if (query.filters) {
                         listOfNotNull(playlist.owner?.let { "By $it" }, filteredCount(songs.size, all.size, true)).joinToString(" · ")
                     } else {
-                        playlistDetails(playlist.owner, all.size, all.sumOf { it.duration }, playlist.public)
+                        shared?.let { listOfNotNull(playlist.owner?.let { "By $it" }, songsLine(all.size, all.sumOf { it.duration }), it).joinToString(" · ") }
+                            ?: playlistDetails(playlist.owner, all.size, all.sumOf { it.duration }, playlist.public)
                     },
                     { app.play(songs) },
                     { app.play(songs, shuffle = true) },

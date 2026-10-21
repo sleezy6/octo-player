@@ -409,13 +409,23 @@ fun ColumnScope.PlaylistMenu(app: AppState, playlist: Playlist, close: () -> Uni
     var deleting by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     var name by remember(playlist.name) { mutableStateOf(playlist.name) }
+    var family by remember { mutableStateOf<FamilyMenuPage?>(null) }
     if (deleting) {
         ConfirmDelete(app, playlist, close) { deleting = false }
         return
     }
+    when (family) {
+        FamilyMenuPage.Share -> return FamilyShareMenu(app, playlist, close) { family = null }
+        FamilyMenuPage.Make -> return MakeFamilyPlaylistMenu(app, playlist, close) { family = null }
+        null -> Unit
+    }
     MenuTitle(playlist.name)
-    playlistMenuActions(empty = playlist.songCount == 0, owns = app.canEdit(playlist)).forEachIndexed { index, group ->
+    val owns = app.canEdit(playlist)
+    val groups = playlistMenuActions(empty = playlist.songCount == 0, owns = owns)
+    groups.forEachIndexed { index, group ->
         if (index > 0) MenuSeparator()
+        // The family rows sit just before the last group (Delete's).
+        if (index == groups.lastIndex && index > 0 && FamilyPlaylistRows(app, playlist, owns) { family = it }) MenuSeparator()
         group.forEach { action ->
             when (action) {
                 CollectionAction.Pin -> {

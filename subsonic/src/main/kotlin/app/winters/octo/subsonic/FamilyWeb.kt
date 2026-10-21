@@ -7,6 +7,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Cookie
@@ -76,6 +78,29 @@ data class FamilyExplicit(
 @Serializable
 private data class FamilyMeExplicit(val explicit: FamilyExplicit? = null)
 
+// A family playlist as the family page lists it: who made it, who it is
+// shared with besides its maker and the owner (empty: the whole family),
+// and whether this account may choose that.
+@Serializable
+data class FamilyPlaylistShare(
+    val id: String = "",
+    val name: String = "",
+    val songCount: Int = 0,
+    val createdBy: String = "",
+    val sharedWith: List<String> = emptyList(),
+    val mayShare: Boolean = false,
+)
+
+// Someone a family playlist can be shared with: the owner or a member.
+@Serializable
+data class FamilyPerson(
+    val username: String = "",
+    val displayName: String = "",
+    val owner: Boolean = false,
+) {
+    val name: String get() = displayName.ifBlank { username }
+}
+
 // The presets a manager picks for a new member.
 enum class FamilyPreset { CoAdmin, Member, Listener, Kid }
 
@@ -138,6 +163,26 @@ class FamilyWeb(
     // Changes the account's explicit choice; the next answer follows it.
     suspend fun setExplicit(choice: ExplicitChoice): FamilyExplicit =
         call("PUT", "me/explicit", body("choice" to choice.name), FamilyExplicit.serializer())
+
+    // The family playlists this account sees, with who each is shared with.
+    suspend fun playlists(): List<FamilyPlaylistShare> =
+        callOrNull("GET", "playlists", null, ListSerializer(FamilyPlaylistShare.serializer())).orEmpty()
+
+    // Everyone a family playlist can be shared with.
+    suspend fun playlistPeople(): List<FamilyPerson> =
+        callOrNull("GET", "playlists/people", null, ListSerializer(FamilyPerson.serializer())).orEmpty()
+
+    // Shares a family playlist with these people (usernames) besides its
+    // maker and the owner, or with the whole family when none. Only its
+    // maker and the owner may.
+    suspend fun sharePlaylist(id: String, people: List<String>) {
+        callOrNull(
+            "PUT",
+            "playlists/${encodeComponent(id)}",
+            JsonObject(mapOf("sharedWith" to JsonArray(people.map(::JsonPrimitive)))),
+            kotlinx.serialization.json.JsonElement.serializer(),
+        )
+    }
 
     // A new invite link for a member, in place of the last one.
     suspend fun newInvite(username: String): FamilyNewInvite =
