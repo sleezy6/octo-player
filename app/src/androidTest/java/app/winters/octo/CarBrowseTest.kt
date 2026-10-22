@@ -74,6 +74,16 @@ class CarBrowseTest {
     }
 
     @Test
+    fun anAlbumAndItsSongCanBeLookedUpById() {
+        val album = children("tab:albums", pageSize = 1).single()
+        assertEquals(album.mediaMetadata.title, ask { getItem(album.mediaId) }.mediaMetadata.title)
+        val song = children(album.mediaId).first()
+        val found = ask { getItem(song.mediaId) }
+        assertEquals(song.mediaId, found.mediaId)
+        assertEquals(song.mediaMetadata.title, found.mediaMetadata.title)
+    }
+
+    @Test
     fun anArtistOpensToTheirAlbums() {
         val artist = children("tab:artists", pageSize = 1).single()
         val albums = children(artist.mediaId)
@@ -87,7 +97,7 @@ class CarBrowseTest {
         assertEquals(ArtworkProvider.AUTHORITY, uri.authority)
         val bitmap = context.contentResolver.openInputStream(uri)!!.use(BitmapFactory::decodeStream)
         assertNotNull(bitmap)
-        assertTrue(bitmap.width in 1..320 && bitmap.height in 1..320)
+        assertTrue(bitmap.width in 1..512 && bitmap.height in 1..512)
     }
 
     @Test

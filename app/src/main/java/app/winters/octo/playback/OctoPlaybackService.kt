@@ -23,6 +23,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSession.ConnectionResult
 import androidx.media3.session.MediaSession.MediaItemsWithStartPosition
 import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import app.winters.octo.MainActivity
 import app.winters.octo.catalog.OnlineDao
@@ -67,6 +68,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -265,6 +267,9 @@ class OctoPlaybackService : MediaLibraryService() {
         }
         // Editing the queue saves it once things settle.
         scope.launch { queueChanged.debounce(500).collect { saveQueue() } }
+        // A car reads its tabs again once the library under them settles,
+        // like after signing in or while a sync brings songs in.
+        scope.launch { car.changes.drop(1).debounce(2_000).collect { refreshCarTabs() } }
         // A switch of server stops the music and brings the other's queue.
         switcher.attach(side)
     }
@@ -440,6 +445,14 @@ class OctoPlaybackService : MediaLibraryService() {
         serverQueue.restored(snapshot())
     }
 
+    private suspend fun refreshCarTabs() {
+        val library = session ?: return
+        for (node in listOf(CarNode.Root, CarNode.Recent, CarNode.Playlists, CarNode.Albums, CarNode.Artists)) {
+            val id = carId(node)
+            library.notifyChildrenChanged(id, car.children(id, 0, Int.MAX_VALUE).size, null)
+        }
+    }
+
     private fun saveQueue() {
         if (!::player.isInitialized || holding) return
         queue.save(snapshot())
@@ -471,13 +484,7 @@ class OctoPlaybackService : MediaLibraryService() {
 
         // A car reads its tabs again, since the library under them changed.
         override fun libraryChanged() {
-            scope.launch {
-                val library = session ?: return@launch
-                for (node in listOf(CarNode.Root, CarNode.Recent, CarNode.Playlists, CarNode.Albums, CarNode.Artists)) {
-                    val id = carId(node)
-                    library.notifyChildrenChanged(id, car.children(id, 0, Int.MAX_VALUE).size, null)
-                }
-            }
+            scope.launch { refreshCarTabs() }
         }
 
         // What plays stops and counts, casting ends, and the player is empty.
@@ -513,7 +520,11 @@ class OctoPlaybackService : MediaLibraryService() {
         private var lastId: String? = null
         private var lastIndex = C.INDEX_UNSET
 
+        // The queue entry last opened again for another file from the server.
+        private var reopened: String? = null
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            reopened = null
             val endedStation = lastId?.takeIf(::isRadio)
             val endedAt = lastIndex
             lastId = mediaItem?.mediaId
@@ -555,6 +566,15 @@ class OctoPlaybackService : MediaLibraryService() {
         // the music, and one line says which and why. Once every song in the
         // queue has failed, it stops.
         override fun onPlayerError(error: PlaybackException) {
+            // The server began sending another file for the song: it opens
+            // again from where it is, from the new file's start, once each
+            // time the song comes on.
+            val entry = player.currentMediaItem?.let { it.entryId ?: it.mediaId }
+            if (entry != null && streamChangedIn(error) && reopened != entry) {
+                reopened = entry
+                scope.launch { player.prepare() }
+                return
+            }
             if (!player.playWhenReady) return
             failedInARow++
             val title = player.currentMediaItem?.mediaMetadata?.title?.toString()?.takeIf(String::isNotBlank) ?: "a song"
@@ -634,22 +654,30 @@ class OctoPlaybackService : MediaLibraryService() {
             // Apps we don't trust keep the read-only access Media3 gives them.
             // A car and the voice assistant need to press play too.
             if (!controller.isTrusted && controller.packageName !in carApps) return super.onConnectAsync(session, controller)
+            // Controllers on the old interfaces are accepted at once: a car or
+            // assistant on the old browser waits for this answer on the main thread.
+            if (controller.controllerVersion == MediaSession.ControllerInfo.LEGACY_CONTROLLER_VERSION) {
+                return Futures.immediateFuture(accepted(session, controller))
+            }
             // The app connects only once the saved queue is back, so it never
             // mistakes a player still restoring for an empty one.
             return scope.future {
                 restored.await()
-                ConnectionResult.AcceptedResultBuilder(session, controller)
-                    .setAvailableSessionCommands(sessionCommands())
-                    .apply {
-                        if (session.isMediaNotificationController(controller) && stationOnAir.value) {
-                            val all = ConnectionResult.DEFAULT_PLAYER_COMMANDS
-                            val kept = mediaControlCommands((0 until all.size()).map(all::get).toSet(), true)
-                            setAvailablePlayerCommands(Player.Commands.Builder().addAll(*kept.toIntArray()).build())
-                        }
-                    }
-                    .build()
+                accepted(session, controller)
             }
         }
+
+        private fun accepted(session: MediaSession, controller: MediaSession.ControllerInfo): ConnectionResult =
+            ConnectionResult.AcceptedResultBuilder(session, controller)
+                .setAvailableSessionCommands(sessionCommands())
+                .apply {
+                    if (session.isMediaNotificationController(controller) && stationOnAir.value) {
+                        val all = ConnectionResult.DEFAULT_PLAYER_COMMANDS
+                        val kept = mediaControlCommands((0 until all.size()).map(all::get).toSet(), true)
+                        setAvailablePlayerCommands(Player.Commands.Builder().addAll(*kept.toIntArray()).build())
+                    }
+                }
+                .build()
 
         override fun onMediaButtonEvent(session: MediaSession, controllerInfo: MediaSession.ControllerInfo, intent: Intent): Boolean {
             val key = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
@@ -740,6 +768,7 @@ class OctoPlaybackService : MediaLibraryService() {
             }
         }
 
+        // Answered at once: the old browser waits for the root on the main thread too.
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -758,6 +787,16 @@ class OctoPlaybackService : MediaLibraryService() {
             val items = car.children(parentId, page, pageSize)
             car.grantArtwork(browser.packageName, items)
             LibraryResult.ofItemList(items, params)
+        }
+
+        override fun onGetItem(
+            session: MediaLibrarySession,
+            browser: MediaSession.ControllerInfo,
+            mediaId: String,
+        ): ListenableFuture<LibraryResult<MediaItem>> = scope.future {
+            val item = car.lookup(mediaId) ?: return@future LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+            car.grantArtwork(browser.packageName, listOf(item))
+            LibraryResult.ofItem(item, null)
         }
 
         override fun onSearch(
