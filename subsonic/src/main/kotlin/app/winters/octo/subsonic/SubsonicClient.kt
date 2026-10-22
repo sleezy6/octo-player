@@ -632,6 +632,21 @@ class SubsonicClient(
         return exchange(Request.Builder().url(url(endpoint)).post(form).build(), endpoint, http)
     }
 
+    // Sends `bytes` as the body of a call, its sign-in and `params` in the
+    // address, and reads the answer under `key`.
+    internal suspend fun <T> postBytes(
+        endpoint: String,
+        params: Map<String, String>,
+        bytes: ByteArray,
+        type: String,
+        key: String,
+        serializer: KSerializer<T>,
+    ): T {
+        val request = Request.Builder().url(url(endpoint, params)).post(bytes.toRequestBody(type.toMediaType())).build()
+        val body = exchange(request, endpoint)
+        return withContext(Dispatchers.Default) { decode(body, key, serializer, null) }
+    }
+
     private suspend fun exchange(request: Request, endpoint: String, http: OkHttpClient = this.http): String {
         val body = try {
             val response = http.newCall(request).await()

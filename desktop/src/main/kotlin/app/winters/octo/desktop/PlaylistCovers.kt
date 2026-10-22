@@ -2,7 +2,11 @@ package app.winters.octo.desktop
 
 import app.winters.octo.desktop.server.userMessage
 import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.subsonic.OCTO_FAMILY
+import app.winters.octo.subsonic.OCTO_FAMILY_COVERS_VERSION
 import app.winters.octo.subsonic.Playlist
+import app.winters.octo.subsonic.deleteFamilyPlaylistCover
+import app.winters.octo.subsonic.setFamilyPlaylistCover
 import app.winters.octo.subsonic.SubsonicException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -17,10 +21,11 @@ import java.io.File
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-// A playlist's own cover, uploaded to Navidrome (0.61 on) through its own
-// API at the server's address; Octo passes it on. Only the listener's own
-// playlists: Navidrome takes a cover only from a playlist's owner, and
-// Octo's family playlists keep theirs on Octo.
+// A playlist's own cover. The listener's own playlists: uploaded to
+// Navidrome (0.61 on) through its own API at the server's address, which
+// Octo passes on; Navidrome takes a cover only from a playlist's owner.
+// Family playlists: Octo keeps theirs (octoFamily 2), set by the
+// playlist's maker or a manager, and paints one when none was uploaded.
 
 // The picture types Navidrome takes as they are.
 private val TAKEN = mapOf("jpg" to "image/jpeg", "jpeg" to "image/jpeg", "png" to "image/png", "gif" to "image/gif", "webp" to "image/webp")
@@ -31,13 +36,24 @@ const val COVER_MOST_BYTES = 8L * 1024 * 1024
 const val COVER_MOST_PX = 2000
 
 // Whether the listener can change this playlist's cover here: their own,
-// signed in with a password.
+// signed in with a password. (A family playlist: familyCoverChanges, which
+// also asks Octo whether they made it or manage the family.)
 fun AppState.changesCover(playlist: Playlist): Boolean =
     canEdit(playlist) && !playlist.isFamily() && connection?.client?.navidrome?.usable == true
 
-// Whether the playlist has a cover uploaded for it, which shows in place of
-// a designed one.
-fun AppState.hasOwnCover(playlist: Playlist): Boolean = playlist.id in ownCovers
+// Whether the server gives family playlists covers of their own.
+fun AppState.familyCovers(): Boolean = connection?.supports(OCTO_FAMILY, OCTO_FAMILY_COVERS_VERSION) == true
+
+// Whether a family playlist's cover could be changed by this listener, as
+// far as the playlist says: Octo then decides whether they made it or
+// manage the family (FamilyPlaylistShare.mayShare).
+fun AppState.familyCoverMayChange(playlist: Playlist): Boolean = playlist.isFamily() && !playlist.readonly && familyCovers()
+
+// Whether the playlist's cover is the server's own, which shows in place of
+// a designed one: one uploaded for it, or a family playlist's, which Octo
+// paints or someone uploaded.
+fun AppState.hasOwnCover(playlist: Playlist): Boolean =
+    playlist.id in ownCovers || (playlist.isFamily() && familyCovers() && !playlist.coverArt.isNullOrBlank())
 
 // Asks for a picture, then uploads it as the playlist's cover.
 fun AppState.chooseCover(playlist: Playlist) {
@@ -49,6 +65,7 @@ fun AppState.chooseCover(playlist: Playlist) {
 }
 
 fun AppState.setCover(playlist: Playlist, file: File) {
+    if (playlist.isFamily()) return setFamilyCover(playlist, file)
     val client = connection?.client ?: return
     scope.launch {
         val prepared = withContext(Dispatchers.IO) { runCatching { coverUpload(file) }.getOrNull() }
@@ -67,9 +84,43 @@ fun AppState.setCover(playlist: Playlist, file: File) {
     }
 }
 
+// A family playlist's cover: the picture's middle square, at most
+// FAMILY_COVER_PX across, as a JPEG, which is what Octo keeps.
+fun AppState.setFamilyCover(playlist: Playlist, file: File) {
+    val client = connection?.client ?: return
+    scope.launch {
+        val square = withContext(Dispatchers.IO) { runCatching { familyCoverJpeg(file.readBytes()) }.getOrNull() }
+        if (square == null) {
+            notice = "That file isn't a picture Octo can read."
+            return@launch
+        }
+        try {
+            val made = client.setFamilyPlaylistCover(playlist.id, square)
+            swapPlaylistCover(playlist.id, made.coverArt)
+            notice = "Changed the cover of ${playlist.name}"
+            refreshPlaylists()
+        } catch (e: SubsonicException) {
+            notice = "Couldn't change the cover: ${e.userMessage()}"
+        }
+    }
+}
+
 // Back to the cover Octo or Navidrome makes for it.
 fun AppState.removeCover(playlist: Playlist) {
     val client = connection?.client ?: return
+    if (playlist.isFamily()) {
+        scope.launch {
+            try {
+                val painted = client.deleteFamilyPlaylistCover(playlist.id)
+                swapPlaylistCover(playlist.id, painted.coverArt)
+                notice = "Removed the cover of ${playlist.name}"
+                refreshPlaylists()
+            } catch (e: SubsonicException) {
+                notice = "Couldn't remove the cover: ${e.userMessage()}"
+            }
+        }
+        return
+    }
     scope.launch {
         try {
             client.navidrome.removePlaylistCover(playlist.id)
@@ -106,6 +157,34 @@ fun coverUpload(file: File): CoverUpload? {
             return CoverUpload(bytes, type, file.name)
         }
         return CoverUpload(shrunkJpeg(image, COVER_MOST_PX), "image/jpeg", file.nameWithoutExtension + ".jpg")
+    } finally {
+        image.close()
+    }
+}
+
+// The size Octo keeps a family playlist's cover at.
+const val FAMILY_COVER_PX = 1500
+
+// A picture's middle square, at most FAMILY_COVER_PX across, as a JPEG.
+fun familyCoverJpeg(bytes: ByteArray): ByteArray {
+    val image = Image.makeFromEncoded(bytes)
+    try {
+        val side = minOf(image.width, image.height)
+        val out = minOf(side, FAMILY_COVER_PX)
+        val surface = Surface.makeRasterN32Premul(out, out)
+        try {
+            val left = (image.width - side) / 2f
+            val top = (image.height - side) / 2f
+            surface.canvas.drawImageRect(image, Rect.makeXYWH(left, top, side.toFloat(), side.toFloat()), Rect.makeWH(out.toFloat(), out.toFloat()))
+            val shot = surface.makeImageSnapshot()
+            try {
+                return shot.encodeToData(EncodedImageFormat.JPEG, 90)?.bytes ?: error("no JPEG")
+            } finally {
+                shot.close()
+            }
+        } finally {
+            surface.close()
+        }
     } finally {
         image.close()
     }

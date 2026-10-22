@@ -39,10 +39,10 @@ class PlaylistCoversTest {
         server.close()
     }
 
-    private fun app(): AppState {
+    private fun app(extensions: List<String> = emptyList()): AppState {
         val settings = SettingsStore(File(temp.root, "settings.json"), 0)
         val http = OkHttpClient()
-        return AppState(settings, Accounts(settings, SessionOnlySecrets(), http), http, scope, DesktopOs.Windows, SilentPlayer(), OnlineLyrics(http, server.address.toHttpUrl()), restored = server.connection())
+        return AppState(settings, Accounts(settings, SessionOnlySecrets(), http), http, scope, DesktopOs.Windows, SilentPlayer(), OnlineLyrics(http, server.address.toHttpUrl()), restored = server.connection(extensions))
     }
 
     private fun waitFor(what: () -> Boolean) {
@@ -122,6 +122,52 @@ class PlaylistCoversTest {
         waitFor { app.notice != null }
         assertTrue(app.notice!!.contains("turned off"), app.notice)
         assertFalse(app.hasOwnCover(mine))
+    }
+
+    private val ours = Playlist("of1", "Ours", owner = "Family", coverArt = "of1_old")
+
+    @Test
+    fun aFamilyCoverIsThePicturesMiddleSquareAsAJpeg() {
+        val sent = familyCoverJpeg(picture(3000, 2000, EncodedImageFormat.PNG, "wide.png").readBytes())
+        val image = Image.makeFromEncoded(sent)
+        assertEquals(1500, image.width)
+        assertEquals(1500, image.height)
+        val small = Image.makeFromEncoded(familyCoverJpeg(picture(400, 900, EncodedImageFormat.PNG, "tall.png").readBytes()))
+        assertEquals(400, small.width)
+        assertEquals(400, small.height)
+    }
+
+    @Test
+    fun aFamilyCoverGoesToOctoAndItsNewCoverShowsAtOnce() {
+        server.respondBy("setFamilyPlaylistCover") { json(server.ok(""""familyPlaylistCover":{"id":"of1","coverArt":"of1_new"}""", type = "octo")) }
+        server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"of1","name":"Ours","owner":"Family","coverArt":"of1_new"}]}""")
+        val app = app(listOf("octoFamily:1", "octoFamily:2"))
+        app.setCover(ours, picture(800, 600, EncodedImageFormat.PNG, "c.png"))
+        waitFor { app.notice != null }
+        assertEquals("Changed the cover of Ours", app.notice)
+        val sent = server.calls.single { it.url.pathSegments.last() == "setFamilyPlaylistCover" }
+        assertEquals("POST", sent.method)
+        assertEquals("of1", sent.url.queryParameter("id"))
+        assertEquals("image/jpeg", sent.headers["Content-Type"])
+        assertTrue(server.calls.none { it.url.encodedPath.endsWith("/image") }, "never Navidrome's own API")
+    }
+
+    @Test
+    fun aFamilyCoverRefusedSaysWhy() {
+        server.answerBy("setFamilyPlaylistCover") { """{"subsonic-response":{"status":"failed","version":"1.16.1","error":{"code":50,"message":"Only the person who made this playlist or a family manager can change its cover."}}}""" }
+        val app = app(listOf("octoFamily:2"))
+        app.setCover(ours, picture(300, 300, EncodedImageFormat.PNG, "c.png"))
+        waitFor { app.notice != null }
+        assertTrue(app.notice!!.contains("family manager"), app.notice)
+    }
+
+    @Test
+    fun familyPlaylistsShowOctosCoverOnlyOnAServerThatGivesThem() {
+        assertTrue(app(listOf("octoFamily:2")).hasOwnCover(ours))
+        assertFalse(app(listOf("octoFamily:1")).hasOwnCover(ours))
+        assertFalse(app(listOf("octoFamily:2")).hasOwnCover(ours.copy(coverArt = null)))
+        assertTrue(app(listOf("octoFamily:2")).familyCoverMayChange(ours))
+        assertFalse(app(listOf("octoFamily:2")).familyCoverMayChange(ours.copy(readonly = true)))
     }
 
     @Test

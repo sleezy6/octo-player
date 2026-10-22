@@ -451,3 +451,24 @@ internal suspend fun okhttp3.Call.awaitBody(endpoint: String): String {
         }
     }
 }
+
+// The family extension's version that gives family playlists covers: each
+// lists a coverArt (Octo's painted one, or a picture someone uploaded) that
+// changes with it, set and taken back by its maker or a manager.
+const val OCTO_FAMILY_COVERS_VERSION = 2
+
+// A family playlist's cover after a change: its new coverArt id.
+@Serializable
+data class FamilyPlaylistCover(val id: String = "", val coverArt: String? = null)
+
+// Sets a family playlist's cover to this picture (`type` such as
+// "image/jpeg"), sent as it is. Octo crops it to its middle square and keeps
+// a JPEG of at most 1500 pixels. Errors: 10 no picture, 70 no such playlist
+// for this account, 50 not theirs to change, 0 a picture refused (the
+// message says why).
+suspend fun SubsonicClient.setFamilyPlaylistCover(id: String, picture: ByteArray, type: String = "image/jpeg"): FamilyPlaylistCover =
+    postBytes("setFamilyPlaylistCover", mapOf("id" to id), picture, type, "familyPlaylistCover", FamilyPlaylistCover.serializer())
+
+// Takes a family playlist's uploaded cover back, to the one Octo paints.
+suspend fun SubsonicClient.deleteFamilyPlaylistCover(id: String): FamilyPlaylistCover =
+    get("deleteFamilyPlaylistCover", mapOf("id" to id), "familyPlaylistCover", FamilyPlaylistCover.serializer())

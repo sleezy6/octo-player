@@ -867,6 +867,11 @@ class AppState(
         playlists = playlists.filterNot { it.id == id }
     }
 
+    // Puts a playlist's new cover in at once, as the server answered it.
+    internal fun swapPlaylistCover(id: String, coverArt: String?) {
+        playlists = playlists.map { if (it.id == id) it.copy(coverArt = coverArt) else it }
+    }
+
     // When the sidebar's playlists were last read.
     private var playlistsReadAt = 0L
 
