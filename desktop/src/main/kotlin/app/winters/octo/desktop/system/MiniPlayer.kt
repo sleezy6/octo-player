@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.window.WindowDraggableArea
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -119,6 +118,7 @@ import androidx.compose.ui.graphics.Shape
 import app.winters.octo.desktop.ui.isOutside
 import app.winters.octo.desktop.ui.rememberPosition
 import app.winters.octo.desktop.window.Frame
+import app.winters.octo.desktop.window.dragsWindow
 import app.winters.octo.desktop.window.ResizeEdges
 import app.winters.octo.desktop.window.roundWindowsCorners
 import app.winters.octo.desktop.window.systemRoundsWindows
@@ -325,7 +325,9 @@ fun MiniPlayerWindow(
                         actions = actions,
                         note = pinNote,
                         shape = if (systemRounds) RectangleShape else MenuShape,
-                        dragArea = { modifier -> if (!prefs.miniPlayerPinned) WindowDraggableArea(modifier) {} },
+                        // Moved by the spot grabbed, as Octo's window is, so it
+                        // crosses screens of other scales smoothly.
+                        dragArea = { modifier -> if (!prefs.miniPlayerPinned) Box(modifier.dragsWindow(frame, fills = false)) },
                     )
                     if (!prefs.miniPlayerPinned) ResizeEdges(frame, thickness = Space.Xs)
                 }

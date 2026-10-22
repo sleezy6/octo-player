@@ -89,9 +89,14 @@ class Frame(private val window: Window, private val state: WindowState) {
             override fun windowActivated(e: WindowEvent?) = refitLater()
         })
         window.addPropertyChangeListener("graphicsConfiguration") { refitLater() }
-        // A floating window keeps its size across screens of other scales.
-        ScreenChange(window, filled = { maximized })
     }
+
+    // Whether a drag of the title bar holds the window now.
+    private var dragging = false
+
+    // A floating window keeps its size across screens of other scales, set
+    // once a drag lets go of it.
+    private val screens = ScreenChange(window, filled = { maximized }, held = { dragging })
 
     fun toggleMaximized() = if (maximized) restore() else maximize()
 
@@ -140,24 +145,50 @@ class Frame(private val window: Window, private val state: WindowState) {
     // The screen the window is mostly on, less the taskbar or panels.
     private fun usableArea(): Rectangle = usableArea(window)
 
-    // Moves the window with the pointer, from where a drag started. A drag
-    // on a filled window first brings it back to its size under the pointer.
-    fun dragBy(startPointer: java.awt.Point, startWindow: java.awt.Point) {
-        val now = MouseInfo.getPointerInfo()?.location ?: return
-        window.setLocation(startWindow.x + now.x - startPointer.x, startWindow.y + now.y - startPointer.y)
+    // Where a drag measures from: the pointer and the window then, and the
+    // screens each was on. Across screens of other scales Windows gives
+    // places in each screen's own units, so a place on one screen and one on
+    // another never mix: when the pointer or the window changes screens the
+    // drag measures afresh from there instead of jumping.
+    private var anchor: DragAnchor? = null
+
+    // Moves the window after the pointer, from where the drag measures.
+    fun follow() {
+        val info = MouseInfo.getPointerInfo() ?: return
+        val config = window.graphicsConfiguration ?: return
+        val pointer = info.location
+        val held = anchor
+        if (held == null || held.device != info.device || held.config != config) {
+            anchor = DragAnchor(pointer, window.location, info.device, config)
+            return
+        }
+        // The pointer's units on its screen, in the window's on its own.
+        val ratio = scaleOf(info.device.defaultConfiguration) / scaleOf(config)
+        val to = followPlace(held.window, held.pointer, pointer, ratio)
+        if (to != window.location) window.location = to
     }
 
-    fun startDrag(): Pair<java.awt.Point, java.awt.Point>? {
-        val pointer = MouseInfo.getPointerInfo()?.location ?: return null
-        if (maximized) {
-            val wide = window.width
-            val back = restoreTo ?: Rectangle(window.x, window.y, 1280, 800)
-            maximized = false
-            // Keep the pointer at the same share across the title bar.
-            val share = (pointer.x - window.x).toDouble() / wide
-            window.bounds = Rectangle((pointer.x - back.width * share).toInt(), window.y, back.width, back.height)
-        }
-        return pointer to window.location
+    fun endDrag() {
+        anchor = null
+        if (!dragging) return
+        dragging = false
+        screens.released()
+    }
+
+    // A drag starts: a filled window first comes back to its size under the
+    // pointer, at the same share across the title bar. True when it did,
+    // so the drag takes the spot it grabs afresh.
+    fun startDrag(): Boolean {
+        anchor = null
+        dragging = true
+        if (!maximized) return false
+        val pointer = MouseInfo.getPointerInfo()?.location ?: return false
+        val wide = window.width
+        val back = restoreTo ?: Rectangle(window.x, window.y, 1280, 800)
+        maximized = false
+        val share = (pointer.x - window.x).toDouble() / wide
+        window.bounds = Rectangle((pointer.x - back.width * share).toInt(), window.y, back.width, back.height)
+        return true
     }
 
     // Resizes from an edge or corner while dragged: `dx`/`dy` say which
@@ -213,32 +244,61 @@ private fun Rectangle.toSpot() = WindowSpot(x.toFloat(), y.toFloat(), width.toFl
 
 private fun Rectangle.toArea() = ScreenArea(x.toFloat(), y.toFloat(), width.toFloat(), height.toFloat())
 
-// The draggable part of the title bar: drag to move, double click to fill
-// the screen or come back.
-fun Modifier.dragsWindow(frame: Frame): Modifier = pointerInput(frame) {
+// The draggable part of the title bar: drag to move, and with `fills`,
+// double click to fill the screen or come back. The window follows the
+// spot grabbed, as dragWindowStep works it out.
+fun Modifier.dragsWindow(frame: Frame, fills: Boolean = true): Modifier = pointerInput(frame, fills) {
     var lastDown = 0L
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
         val now = System.currentTimeMillis()
-        if (now - lastDown < 400) {
+        if (fills && now - lastDown < 400) {
             frame.toggleMaximized()
             lastDown = 0L
             return@awaitEachGesture
         }
         lastDown = now
-        var start: Pair<java.awt.Point, java.awt.Point>? = null
-        while (true) {
-            val event = awaitPointerEvent()
-            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-            if (!change.pressed) break
-            if (change.positionChange() != androidx.compose.ui.geometry.Offset.Zero) {
-                if (start == null) start = frame.startDrag()
-                start?.let { frame.dragBy(it.first, it.second) }
+        var started = false
+        try {
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (!change.pressed) break
+                if (change.positionChange() == androidx.compose.ui.geometry.Offset.Zero) continue
                 change.consume()
+                if (!started) {
+                    started = true
+                    frame.startDrag()
+                }
+                frame.follow()
             }
+        } finally {
+            frame.endDrag()
         }
     }
 }
+
+// Where a drag measured from: the pointer and the window then, and the
+// screens they were on.
+private class DragAnchor(
+    val pointer: java.awt.Point,
+    val window: java.awt.Point,
+    val device: java.awt.GraphicsDevice,
+    val config: java.awt.GraphicsConfiguration,
+)
+
+// The window's place once the pointer moved from `fromPointer` to
+// `pointer`, the window having been at `fromWindow`: moved as far as the
+// pointer, its units made the window's by `ratio`.
+fun followPlace(fromWindow: java.awt.Point, fromPointer: java.awt.Point, pointer: java.awt.Point, ratio: Double): java.awt.Point =
+    java.awt.Point(
+        fromWindow.x + kotlin.math.round((pointer.x - fromPointer.x) * ratio).toInt(),
+        fromWindow.y + kotlin.math.round((pointer.y - fromPointer.y) * ratio).toInt(),
+    )
+
+// A screen's scale: its pixels to a unit (1.5 at 150%).
+private fun scaleOf(config: java.awt.GraphicsConfiguration): Double =
+    config.defaultTransform.scaleX.takeIf { it > 0.0 } ?: 1.0
 
 // The window's own buttons: minimize, maximize or restore, and close. Over
 // the full player they take its `ink`, a step quieter until hovered.

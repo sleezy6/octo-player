@@ -20,6 +20,9 @@ import javax.swing.Timer
 class ScreenChange(
     private val window: Window,
     private val filled: () -> Boolean = { false },
+    // Whether the window is held by a drag of Octo's own: the size waits
+    // until it is let go (`released`).
+    private val held: () -> Boolean = { false },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     // The size the window had, while it stayed on one screen: the latest,
@@ -54,7 +57,13 @@ class ScreenChange(
         }
     }
 
+    // A drag let go: a size waiting for it is set now.
+    fun released() {
+        if (pending) settle.restart()
+    }
+
     private fun settled() {
+        if (held()) return
         pending = false
         screen = window.graphicsConfiguration
         if (!filled() && window.isShowing) {

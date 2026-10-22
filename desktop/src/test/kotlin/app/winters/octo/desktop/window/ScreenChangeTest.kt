@@ -51,3 +51,16 @@ class ScreenChangeTest {
         assertEquals(Dimension(1100, 700), sizes.before(at = 5_000))
     }
 }
+
+class FollowPlaceTest {
+    @Test
+    fun theWindowMovesAsFarAsThePointer() {
+        assertEquals(java.awt.Point(130, 220), followPlace(java.awt.Point(100, 200), java.awt.Point(500, 500), java.awt.Point(530, 520), 1.0))
+    }
+
+    @Test
+    fun aPointerOnAScreenOfAnotherScaleMovesItInTheWindowsUnits() {
+        // The pointer on a 150% screen, the window still on a 100% one.
+        assertEquals(java.awt.Point(145, 200), followPlace(java.awt.Point(100, 200), java.awt.Point(0, 0), java.awt.Point(30, 0), 1.5))
+    }
+}
