@@ -69,7 +69,12 @@ class ScreenChange(
     }
 
     private fun settled() {
-        if (held()) return
+        // Still held (a system move the window's own thread runs): looked at
+        // again shortly, since nothing else says when it lets go.
+        if (held()) {
+            settle.restart()
+            return
+        }
         pending = false
         screen = window.graphicsConfiguration
         if (!filled() && window.isShowing) {

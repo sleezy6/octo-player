@@ -96,7 +96,7 @@ class Frame(private val window: Window, private val state: WindowState) {
 
     // A floating window keeps its size across screens of other scales, set
     // once a drag lets go of it.
-    private val screens = ScreenChange(window, filled = { maximized }, held = { dragging })
+    private val screens = ScreenChange(window, filled = { maximized }, held = { dragging || SystemDrag.mouseHeld() })
 
     fun toggleMaximized() = if (maximized) restore() else maximize()
 
@@ -175,6 +175,9 @@ class Frame(private val window: Window, private val state: WindowState) {
         dragging = false
         screens.released()
     }
+
+    // Hands the drag to the system where it moves windows itself (Windows).
+    fun systemDrag(): Boolean = SystemDrag.start(window)
 
     // A drag starts: a filled window first comes back to its size under the
     // pointer, at the same share across the title bar. True when it did,
@@ -271,6 +274,9 @@ fun Modifier.dragsWindow(frame: Frame, fills: Boolean = true): Modifier = pointe
                 if (!started) {
                     started = true
                     frame.startDrag()
+                    // Windows moves the window itself from here; the press
+                    // is its to finish, so this gesture ends.
+                    if (frame.systemDrag()) break
                 }
                 frame.follow()
             }
