@@ -7,6 +7,7 @@ import app.winters.octo.desktop.settings.DesktopOs
 import app.winters.octo.desktop.settings.SettingsStore
 import app.winters.octo.lyrics.OnlineLyrics
 import app.winters.octo.subsonic.Playlist
+import app.winters.octo.subsonic.PlaylistWithSongs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -167,6 +168,18 @@ class PlaylistCoversTest {
         assertEquals("of1", sent.url.queryParameter("id"))
         assertEquals("image/jpeg", sent.headers["Content-Type"])
         assertTrue(server.calls.none { it.url.encodedPath.endsWith("/image") }, "never Navidrome's own API")
+    }
+
+    @Test
+    fun thePagesOwnCopyTakesTheNewCoverToo() {
+        server.respondBy("setFamilyPlaylistCover") { json(server.ok(""""familyPlaylistCover":{"id":"of1","coverArt":"of1_new"}""", type = "octo")) }
+        server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"of1","name":"Ours","owner":"Family","coverArt":"of1_new"}]}""")
+        val app = app(listOf("octoFamily:2"))
+        val client = app.connection!!.client
+        app.playlistViews["of1"] = PlaylistView(client, PlaylistWithSongs("of1", "Ours", owner = "Family", coverArt = "of1_old"))
+        app.setCover(ours, picture(300, 300, EncodedImageFormat.PNG, "c.png"))
+        waitFor { app.notice != null }
+        assertEquals("of1_new", app.playlistView("of1")?.coverArt)
     }
 
     @Test

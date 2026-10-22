@@ -34,8 +34,12 @@ class NavidromeNative internal constructor(
     @Volatile private var token: String? = null
     private val signing = Mutex()
 
+    // Set once the server said it has no such API (not Navidrome, or an old
+    // one), so it is not asked again while this client lives.
+    @Volatile private var absent = false
+
     // Whether this sign-in can reach Navidrome's own API at all.
-    val usable: Boolean get() = password() != null
+    val usable: Boolean get() = password() != null && !absent
 
     // The ids of the playlists that have a cover of their own uploaded, or
     // null when the answer is not Navidrome's list (nothing is known then).
@@ -96,7 +100,10 @@ class NavidromeNative internal constructor(
             .build()
         val (status, body) = send(request)
         if (status == 401 || status == 403) throw SubsonicException.WrongCredentials("The server did not take this account's password for that.")
-        if (status == 404) throw SubsonicException.Server(404, NOT_NAVIDROME)
+        if (status == 404) {
+            absent = true
+            throw SubsonicException.Server(404, NOT_NAVIDROME)
+        }
         if (status !in 200..299) throw SubsonicException.Server(status, "The server could not sign in to Navidrome (HTTP $status).")
         val got = runCatching { (json.parseToJsonElement(body) as? JsonObject)?.get("token")?.jsonPrimitive?.contentOrNull }.getOrNull()
             ?.takeIf(String::isNotBlank) ?: throw SubsonicException.Server(0, NOT_NAVIDROME)

@@ -57,6 +57,12 @@ class ScreenChange(
         }
     }
 
+    // The window was just given a size of its own (back from filling the
+    // screen): that is the size to keep from now, whatever came before.
+    fun startsFrom(size: Dimension) {
+        sizes.reset(size)
+    }
+
     // A drag let go: a size waiting for it is set now.
     fun released() {
         if (pending) settle.restart()

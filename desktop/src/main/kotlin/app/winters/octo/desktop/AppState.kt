@@ -855,6 +855,14 @@ class AppState(
                 playlists = client.playlists()
                 playlistsReadAt = System.currentTimeMillis()
                 home?.playlistsAnswered(playlists)
+                // A page's own copy takes the list's cover, which changes
+                // when a cover is uploaded or taken away (here or elsewhere).
+                for (listed in playlists) {
+                    val view = playlistViews[listed.id] ?: continue
+                    if (view.client === client && view.playlist.coverArt != listed.coverArt) {
+                        playlistViews[listed.id] = PlaylistView(client, view.playlist.copy(coverArt = listed.coverArt))
+                    }
+                }
                 readOwnCovers()
             } catch (e: SubsonicException) {
                 // The sidebar keeps what it had.
@@ -870,6 +878,7 @@ class AppState(
     // Puts a playlist's new cover in at once, as the server answered it.
     internal fun swapPlaylistCover(id: String, coverArt: String?) {
         playlists = playlists.map { if (it.id == id) it.copy(coverArt = coverArt) else it }
+        playlistViews[id]?.let { playlistViews[id] = PlaylistView(it.client, it.playlist.copy(coverArt = coverArt)) }
     }
 
     // When the sidebar's playlists were last read.

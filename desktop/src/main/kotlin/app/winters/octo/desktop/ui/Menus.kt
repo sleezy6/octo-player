@@ -30,6 +30,10 @@ import app.winters.octo.desktop.ratingOf
 import app.winters.octo.desktop.removeFromPlaylist
 import app.winters.octo.desktop.removeFromQueue
 import app.winters.octo.desktop.setRating
+import app.winters.octo.desktop.isFamily
+import app.winters.octo.desktop.familyShareOf
+import app.winters.octo.subsonic.FamilyPlaylistShare
+import androidx.compose.runtime.produceState
 import app.winters.octo.desktop.artistRatingOf
 import app.winters.octo.desktop.setArtistRating
 import app.winters.octo.desktop.startAlbumRadio
@@ -425,13 +429,16 @@ fun ColumnScope.PlaylistMenu(app: AppState, playlist: Playlist, close: () -> Uni
     }
     MenuTitle(playlist.name)
     val owns = app.canEdit(playlist)
+    // What Octo says this listener may do with a family playlist, read once
+    // for the menu's family and cover rows.
+    val share by produceState<FamilyPlaylistShare?>(null, playlist.id) { if (playlist.isFamily()) value = app.familyShareOf(playlist.id) }
     val groups = playlistMenuActions(empty = playlist.songCount == 0, owns = owns)
     groups.forEachIndexed { index, group ->
         if (index > 0) MenuSeparator()
         // The family rows sit just before the last group (Delete's).
         if (index == groups.lastIndex && index > 0) {
-            val covers = PlaylistCoverRows(app, playlist, close)
-            if (FamilyPlaylistRows(app, playlist, owns) { family = it } || covers) MenuSeparator()
+            val covers = PlaylistCoverRows(app, playlist, share, close)
+            if (FamilyPlaylistRows(app, playlist, owns, share) { family = it } || covers) MenuSeparator()
         }
         group.forEach { action ->
             when (action) {

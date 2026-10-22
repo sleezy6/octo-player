@@ -392,7 +392,7 @@ class PlaylistSync @Inject constructor(
     private suspend fun newestNamed(server: Server, name: String): String? {
         val linked = user.serverPlaylists(server.sourceId).mapNotNullTo(HashSet()) { it.serverId }
         return importable(server.client.playlists(), emptySet(), server.client.username)
-            .filter { it.name == name && it.id !in linked }
+            .filter { it.name == name && it.id !in linked && !isFamilyPlaylist(it) }
             .maxByOrNull { it.created.orEmpty() }?.id
     }
 

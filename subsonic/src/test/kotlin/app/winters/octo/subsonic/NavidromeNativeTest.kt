@@ -109,6 +109,28 @@ class NavidromeNativeTest {
     }
 
     @Test
+    fun aServerWithNoSuchApiIsAskedOnce() = runTest {
+        server.close()
+        val other = MockWebServer()
+        other.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                calls += request
+                return MockResponse.Builder().code(404).body("404 page not found\n").build()
+            }
+        }
+        other.start()
+        try {
+            val native = SubsonicClient(other.url("/"), Credentials("alex", "secret"), OkHttpClient()).navidrome
+            assertTrue(native.usable)
+            assertTrue(runCatching { native.playlistsWithCovers() }.isFailure)
+            assertFalse(native.usable)
+            assertEquals(1, calls.size)
+        } finally {
+            other.close()
+        }
+    }
+
+    @Test
     fun navidromesRefusalsSayWhy() = runTest {
         suspend fun said(status: Int, body: String): String {
             image = { MockResponse.Builder().code(status).body(body).build() }

@@ -120,6 +120,7 @@ class Frame(private val window: Window, private val state: WindowState) {
             val min = window.minimumSize
             val spot = restoreSpot(before.toSpot(), screenAreas(), usableArea().toArea(), min.width.toFloat(), min.height.toFloat())
             window.bounds = Rectangle(spot.x.toInt(), spot.y.toInt(), spot.width.toInt(), spot.height.toInt())
+            screens.startsFrom(window.size)
         }
         maximized = false
     }
@@ -188,6 +189,7 @@ class Frame(private val window: Window, private val state: WindowState) {
         maximized = false
         val share = (pointer.x - window.x).toDouble() / wide
         window.bounds = Rectangle((pointer.x - back.width * share).toInt(), window.y, back.width, back.height)
+        screens.startsFrom(window.size)
         return true
     }
 

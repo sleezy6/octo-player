@@ -32,9 +32,8 @@ internal enum class FamilyMenuPage { Share, Make }
 // The family rows for a playlist's menu, when there are any: false when
 // none showed, so no separator is wanted.
 @Composable
-internal fun ColumnScope.FamilyPlaylistRows(app: AppState, playlist: Playlist, owns: Boolean, open: (FamilyMenuPage) -> Unit): Boolean {
+internal fun ColumnScope.FamilyPlaylistRows(app: AppState, playlist: Playlist, owns: Boolean, share: FamilyPlaylistShare?, open: (FamilyMenuPage) -> Unit): Boolean {
     if (playlist.isFamily()) {
-        val share by produceState<FamilyPlaylistShare?>(null, playlist.id) { value = app.familyShareOf(playlist.id) }
         val mine = share?.takeIf { it.mayShare } ?: return false
         MenuRow("Shared with…", { open(FamilyMenuPage.Share) }, OctoIcons.Share, more = true, detail = if (mine.sharedWith.isEmpty()) "Everyone" else "${mine.sharedWith.size}")
         return true
