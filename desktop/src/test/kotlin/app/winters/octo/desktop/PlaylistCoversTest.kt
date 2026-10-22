@@ -90,7 +90,8 @@ class PlaylistCoversTest {
     fun theCoverGoesToNavidromeAndShowsAsTheListenersOwn() {
         server.respondBy("login") { json("""{"token":"t1","username":"winters"}""") }
         server.respondBy("image") { json("""{"status":"ok"}""") }
-        server.answer("getPlaylists", """"playlists":{"playlist":[]}""")
+        server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Road trip","owner":"winters"}]}""")
+        server.respondBy("playlist") { json("""[{"id":"p1","name":"Road trip","uploadedImage":"p1_a.jpg"}]""") }
         val app = app()
         app.setCover(mine, picture(300, 300, EncodedImageFormat.JPEG, "c.jpg"))
         waitFor { app.notice != null }
@@ -98,6 +99,22 @@ class PlaylistCoversTest {
         val upload = server.calls.single { it.url.encodedPath == "/api/playlist/p1/image" }
         assertEquals("POST", upload.method)
         assertEquals("Bearer t1", upload.headers["X-ND-Authorization"])
+        // The playlists are read again after: the cover stays the listener's own.
+        waitFor { server.calls.any { it.url.encodedPath == "/api/playlist" } }
+        Thread.sleep(100)
+        assertTrue(app.hasOwnCover(mine))
+    }
+
+    @Test
+    fun aListThatCannotBeReadKeepsWhatWasKnown() {
+        server.respondBy("login") { json("""{"token":"t1"}""") }
+        server.respondBy("image") { json("""{"status":"ok"}""") }
+        server.answer("getPlaylists", """"playlists":{"playlist":[{"id":"p1","name":"Road trip","owner":"winters"}]}""")
+        server.respondBy("playlist") { json("<html>busy</html>", 502) }
+        val app = app()
+        app.setCover(mine, picture(300, 300, EncodedImageFormat.JPEG, "c.jpg"))
+        waitFor { server.calls.any { it.url.encodedPath == "/api/playlist" } }
+        Thread.sleep(100)
         assertTrue(app.hasOwnCover(mine))
     }
 

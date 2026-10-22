@@ -37,12 +37,13 @@ class NavidromeNative internal constructor(
     // Whether this sign-in can reach Navidrome's own API at all.
     val usable: Boolean get() = password() != null
 
-    // The ids of the playlists that have a cover of their own uploaded.
-    suspend fun playlistsWithCovers(): Set<String> {
+    // The ids of the playlists that have a cover of their own uploaded, or
+    // null when the answer is not Navidrome's list (nothing is known then).
+    suspend fun playlistsWithCovers(): Set<String>? {
         val text = call("playlists") { url, auth ->
             Request.Builder().url(url.newBuilder().addPathSegments("api/playlist").addQueryParameter("_start", "0").addQueryParameter("_end", "5000").build()).header(HEADER, auth).build()
         }
-        val list = runCatching { json.parseToJsonElement(text) as? JsonArray }.getOrNull() ?: return emptySet()
+        val list = runCatching { json.parseToJsonElement(text) as? JsonArray }.getOrNull() ?: return null
         return list.mapNotNullTo(HashSet()) { row ->
             val playlist = row as? JsonObject ?: return@mapNotNullTo null
             val image = (playlist["uploadedImage"] as? JsonPrimitive)?.contentOrNull

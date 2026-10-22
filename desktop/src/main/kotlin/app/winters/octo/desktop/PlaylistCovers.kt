@@ -134,7 +134,8 @@ fun AppState.removeCover(playlist: Playlist) {
 }
 
 // Which playlists have an uploaded cover, read again with the playlists.
-// Quietly nothing when the server has none or this sign-in can't ask.
+// Quietly nothing when the server has none or this sign-in can't ask; an
+// answer that could not be read keeps what was known.
 internal suspend fun AppState.readOwnCovers() {
     val native = connection?.client?.navidrome ?: return
     if (!native.usable || playlists.none(::canEdit)) {
