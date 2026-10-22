@@ -322,6 +322,10 @@ class AppState(
     var playlists by mutableStateOf<List<Playlist>>(emptyList())
         private set
 
+    // The listener's playlists with a cover uploaded to Navidrome, which
+    // shows in place of a designed one (PlaylistCovers.kt).
+    var ownCovers by mutableStateOf<Set<String>>(emptySet())
+
     private val keptShelves = homeShelves?.let { HomeShelfStore(it, KeptShelves.serializer()) }
 
     var sidePanel by mutableStateOf(SidePanel.of(settings.current.sidePanel))
@@ -544,6 +548,7 @@ class AppState(
             noticeDetail = null
             starOverrides.clear()
             ratingOverrides.clear()
+            ownCovers = emptySet()
             failedSongs.clear()
             failedOrder.clear()
             playlistViews.clear()
@@ -850,6 +855,7 @@ class AppState(
                 playlists = client.playlists()
                 playlistsReadAt = System.currentTimeMillis()
                 home?.playlistsAnswered(playlists)
+                readOwnCovers()
             } catch (e: SubsonicException) {
                 // The sidebar keeps what it had.
             }

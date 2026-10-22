@@ -31,6 +31,10 @@ class Credentials(
     // The secret itself, only for sealing it into a hand-over.
     internal fun handOverSecret(): String = secret
 
+    // The account's password, for a sign-in that needs it outright
+    // (Navidrome's own API); none for a sign-in made with an API key.
+    internal fun passwordOrNull(): String? = secret.takeIf { mode != AuthMode.ApiKey }
+
     // The query parameters that prove who is asking, fresh for each request.
     fun authParams(): List<Pair<String, String>> = when (mode) {
         AuthMode.Token -> {

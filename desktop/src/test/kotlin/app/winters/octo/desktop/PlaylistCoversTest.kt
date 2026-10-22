@@ -1,0 +1,134 @@
+package app.winters.octo.desktop
+
+import app.winters.octo.desktop.player.SilentPlayer
+import app.winters.octo.desktop.secrets.SessionOnlySecrets
+import app.winters.octo.desktop.server.Accounts
+import app.winters.octo.desktop.settings.DesktopOs
+import app.winters.octo.desktop.settings.SettingsStore
+import app.winters.octo.lyrics.OnlineLyrics
+import app.winters.octo.subsonic.Playlist
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import mockwebserver3.MockResponse
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import org.jetbrains.skia.EncodedImageFormat
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.Surface
+import org.junit.After
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+// A playlist's own cover, uploaded to Navidrome through the server.
+class PlaylistCoversTest {
+    @get:Rule val temp = TemporaryFolder()
+
+    private val server = FakeServer()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)
+
+    @After
+    fun stop() {
+        scope.cancel()
+        server.close()
+    }
+
+    private fun app(): AppState {
+        val settings = SettingsStore(File(temp.root, "settings.json"), 0)
+        val http = OkHttpClient()
+        return AppState(settings, Accounts(settings, SessionOnlySecrets(), http), http, scope, DesktopOs.Windows, SilentPlayer(), OnlineLyrics(http, server.address.toHttpUrl()), restored = server.connection())
+    }
+
+    private fun waitFor(what: () -> Boolean) {
+        val until = System.currentTimeMillis() + 5_000
+        while (!what() && System.currentTimeMillis() < until) Thread.sleep(10)
+        assertTrue(what())
+    }
+
+    private fun json(body: String, code: Int = 200) = MockResponse.Builder().code(code).body(body).build()
+
+    private fun picture(w: Int, h: Int, format: EncodedImageFormat, name: String): File {
+        val surface = Surface.makeRasterN32Premul(w, h)
+        surface.canvas.clear(0xFF3366CC.toInt())
+        val bytes = surface.makeImageSnapshot().encodeToData(format, 90)!!.bytes
+        return File(temp.root, name).apply { writeBytes(bytes) }
+    }
+
+    private val mine = Playlist("p1", "Road trip", owner = "winters")
+
+    @Test
+    fun aSmallPictureGoesAsItIs() {
+        val file = picture(600, 600, EncodedImageFormat.PNG, "cover.png")
+        val sent = coverUpload(file)!!
+        assertEquals("image/png", sent.type)
+        assertTrue(sent.bytes.contentEquals(file.readBytes()))
+    }
+
+    @Test
+    fun aHugePictureGoesAsAJpegAtMostTwoThousandAcross() {
+        val sent = coverUpload(picture(4000, 3000, EncodedImageFormat.PNG, "huge.png"))!!
+        assertEquals("image/jpeg", sent.type)
+        assertEquals("huge.jpg", sent.name)
+        val image = Image.makeFromEncoded(sent.bytes)
+        assertEquals(2000, image.width)
+        assertEquals(1500, image.height)
+    }
+
+    @Test
+    fun aFileThatIsNoPictureIsRefused() {
+        val file = File(temp.root, "notes.png").apply { writeText("not a picture") }
+        assertEquals(null, runCatching { coverUpload(file) }.getOrNull())
+    }
+
+    @Test
+    fun theCoverGoesToNavidromeAndShowsAsTheListenersOwn() {
+        server.respondBy("login") { json("""{"token":"t1","username":"winters"}""") }
+        server.respondBy("image") { json("""{"status":"ok"}""") }
+        server.answer("getPlaylists", """"playlists":{"playlist":[]}""")
+        val app = app()
+        app.setCover(mine, picture(300, 300, EncodedImageFormat.JPEG, "c.jpg"))
+        waitFor { app.notice != null }
+        assertEquals("Changed the cover of Road trip", app.notice)
+        val upload = server.calls.single { it.url.encodedPath == "/api/playlist/p1/image" }
+        assertEquals("POST", upload.method)
+        assertEquals("Bearer t1", upload.headers["X-ND-Authorization"])
+        assertTrue(app.hasOwnCover(mine))
+    }
+
+    @Test
+    fun removingTheCoverGoesBackToTheMadeOne() {
+        server.respondBy("login") { json("""{"token":"t1"}""") }
+        server.respondBy("image") { json("""{"status":"ok"}""") }
+        val app = app()
+        app.ownCovers = setOf("p1")
+        app.removeCover(mine)
+        waitFor { app.notice != null }
+        assertEquals("DELETE", server.calls.single { it.url.encodedPath == "/api/playlist/p1/image" }.method)
+        assertFalse(app.hasOwnCover(mine))
+    }
+
+    @Test
+    fun aRefusalSaysWhy() {
+        server.respondBy("login") { json("""{"token":"t1"}""") }
+        server.respondBy("image") { json("artwork upload is disabled\n", 403) }
+        val app = app()
+        app.setCover(mine, picture(100, 100, EncodedImageFormat.PNG, "c.png"))
+        waitFor { app.notice != null }
+        assertTrue(app.notice!!.contains("turned off"), app.notice)
+        assertFalse(app.hasOwnCover(mine))
+    }
+
+    @Test
+    fun onlyTheListenersOwnPlaylistsChangeCoverHere() {
+        val app = app()
+        assertTrue(app.changesCover(mine))
+        assertFalse(app.changesCover(Playlist("of1", "Ours", owner = "Family")))
+        assertFalse(app.changesCover(Playlist("p9", "Sam's", owner = "sam")))
+    }
+}

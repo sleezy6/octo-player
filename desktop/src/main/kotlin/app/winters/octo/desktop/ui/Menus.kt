@@ -429,7 +429,10 @@ fun ColumnScope.PlaylistMenu(app: AppState, playlist: Playlist, close: () -> Uni
     groups.forEachIndexed { index, group ->
         if (index > 0) MenuSeparator()
         // The family rows sit just before the last group (Delete's).
-        if (index == groups.lastIndex && index > 0 && FamilyPlaylistRows(app, playlist, owns) { family = it }) MenuSeparator()
+        if (index == groups.lastIndex && index > 0) {
+            val covers = PlaylistCoverRows(app, playlist, close)
+            if (FamilyPlaylistRows(app, playlist, owns) { family = it } || covers) MenuSeparator()
+        }
         group.forEach { action ->
             when (action) {
                 CollectionAction.Pin -> {

@@ -675,6 +675,9 @@ class SubsonicClient(
     // connections and headers, each signed as every Subsonic call is.
     fun familyWeb(): FamilyWeb = FamilyWeb(baseUrl, http, ::signed)
 
+    // Navidrome's own API at the server's address, for playlist covers.
+    val navidrome: NavidromeNative by lazy { NavidromeNative({ baseUrl }, http, { credentials.username }, { credentials.passwordOrNull() }) }
+
     // The same server, headers and route signed in with another secret, for
     // checking a password without touching this client.
     fun withSecret(secret: String): SubsonicClient =

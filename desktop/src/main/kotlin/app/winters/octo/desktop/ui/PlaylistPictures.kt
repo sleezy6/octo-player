@@ -1,5 +1,7 @@
 package app.winters.octo.desktop.ui
 
+import app.winters.octo.desktop.hasOwnCover
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -113,7 +115,8 @@ fun PlaylistWithSongs.summary() = Playlist(id, name, comment, owner, public, son
 // A playlist's picture, as the listener chose: designed, or the server's mosaic.
 @Composable
 fun PlaylistPicture(app: AppState, playlist: Playlist, modifier: Modifier, shape: Shape) {
-    if (playlistCoverStyle(app) == PlaylistCoverStyle.Mosaic) {
+    // A cover uploaded for it shows in either style.
+    if (playlistCoverStyle(app) == PlaylistCoverStyle.Mosaic || app.hasOwnCover(playlist)) {
         Cover(playlist.coverArt, modifier, shape = shape, placeholder = OctoIcons.Playlists)
     } else {
         DesignedCover(app, playlistOrder(playlist, app.connection?.client?.username), modifier, shape)
