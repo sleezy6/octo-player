@@ -473,6 +473,23 @@ class Accounts(
         return ServerCheck(Reach.Answers, ms)
     }
 
+    // Asks the server in use which extensions it lists now, and keeps them
+    // when they changed: a server updated since the sign-in offers more (a
+    // family extension's next version, say) and the app follows. The
+    // connection given back carries them; null when nothing changed or the
+    // server could not say.
+    suspend fun refreshExtensions(inUse: Connection): Connection? {
+        val server = inUse.server
+        val info = runCatching { inUse.client.ping() }.getOrNull() ?: return null
+        if (!info.openSubsonic) return null
+        val listed = runCatching { inUse.client.extensions() }.getOrNull() ?: return null
+        val keys = ServerFacts(info, listed).extensionKeys
+        if (keys == server.extensions) return null
+        val fresh = server.copy(extensions = keys, serverType = info.type ?: server.serverType, serverVersion = info.serverVersion ?: server.serverVersion)
+        if (find(fresh.id) != null) settings.update { s -> s.copy(servers = s.servers.map { if (it.id == fresh.id) fresh else it }) }
+        return Connection(inUse.client, fresh, inUse.headers)
+    }
+
     // Whether a server's sign-in outlasts this run of Octo.
     fun remembers(server: SavedServer): Boolean = server.rememberSignIn && secrets.lasting
 

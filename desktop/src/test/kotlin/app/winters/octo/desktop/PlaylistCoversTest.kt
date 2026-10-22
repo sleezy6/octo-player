@@ -201,6 +201,17 @@ class PlaylistCoversTest {
     }
 
     @Test
+    fun aServerUpdatedSinceTheSignInIsFollowedWithoutSigningInAgain() {
+        server.answer("ping")
+        server.answer("getOpenSubsonicExtensions", """"openSubsonicExtensions":[{"name":"octoFamily","versions":[1,2]}]""")
+        // Signed in while the server listed only version 1.
+        val app = app(listOf("octoFamily:1"))
+        waitFor { app.familyCovers() }
+        assertTrue(app.familyCoverMayChange(ours))
+        assertTrue(app.hasOwnCover(ours))
+    }
+
+    @Test
     fun onlyTheListenersOwnPlaylistsChangeCoverHere() {
         val app = app()
         assertTrue(app.changesCover(mine))

@@ -676,6 +676,22 @@ class AppState(
         // the stream quality, so it is read before the first song plays.
         if (connection.family) scope.launch { family.plan() }
         offline.poke()
+        followExtensions(connection)
+    }
+
+    // A server updated since the sign-in may list extensions it did not
+    // then (a feature's next version): they are asked for again once the
+    // connection is up, and the connection takes them, so what the server
+    // offers now shows without signing in again. Only the listing changes;
+    // the client, the library and every view stay as they are.
+    private fun followExtensions(connection: Connection) {
+        scope.launch {
+            val fresh = accounts.refreshExtensions(connection) ?: return@launch
+            if (this@AppState.connection !== connection) return@launch
+            this@AppState.connection = fresh
+            animated.follow(fresh)
+            if (fresh.family && !connection.family) family.plan()
+        }
     }
 
     private fun startReading(views: ServerViews) {
